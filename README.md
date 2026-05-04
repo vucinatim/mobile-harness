@@ -14,9 +14,10 @@ Current scaffold status:
 - Android WebView console streaming over CDP
 - Android WebView network streaming over CDP
 - shared core types and backend contract
+- shared session operations used by both CLI and MCP
 - CLI entrypoint
 - iOS backend stub
-- MCP server stub
+- MCP server with bounded agent-facing read tools
 
 Run:
 
@@ -31,3 +32,24 @@ bun run mobile-harness js eval --session <session-id> --target <target-id> --exp
 bun run mobile-harness console tail --session <session-id> --target <target-id>
 bun run mobile-harness network tail --session <session-id> --target <target-id>
 ```
+
+Run MCP:
+
+```bash
+bun run mobile-harness:mcp
+```
+
+Current MCP tools:
+
+- `mobile_list_devices`
+- `mobile_attach_session`
+- `mobile_get_capabilities`
+- `mobile_capture_device_screenshot`
+- `mobile_list_webviews`
+- `mobile_eval_js`
+- `mobile_capture_webview_screenshot`
+- `mobile_read_logs`
+- `mobile_read_console`
+- `mobile_read_network`
+
+The MCP surface intentionally exposes bounded `read_*` tools for logs, console, and network instead of open-ended tails. That keeps tool calls deterministic for agents while the CLI remains the live streaming interface.

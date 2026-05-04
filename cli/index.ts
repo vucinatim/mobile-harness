@@ -1,14 +1,23 @@
-import type { AppSession, DeviceSummary, WebviewTarget } from "../core/types.ts";
 import { HarnessError } from "../core/errors.ts";
+import {
+  captureSessionWebviewScreenshot,
+  evalSessionJs,
+  listSessionWebviews,
+  streamSessionConsole,
+  streamSessionNetwork,
+} from "../core/operations.ts";
 import {
   captureSessionScreenshot,
   createSession,
-  createBackends,
   listDevices,
   parsePlatform,
   tailSessionLogs,
 } from "../core/registry.ts";
-import { loadSession } from "../core/storage.ts";
+import type {
+  AppSession,
+  DeviceSummary,
+  WebviewTarget,
+} from "../core/types.ts";
 
 type ExplicitPlatform = Exclude<ReturnType<typeof parsePlatform>, "all">;
 
@@ -309,11 +318,6 @@ const runScreenshot = async (args: string[]) => {
   console.log(`Saved screenshot to ${artifact.path}`);
 };
 
-const getBackendForSession = async (sessionId: string) => {
-  const session = await loadSession(sessionId);
-  return createBackends()[session.platform];
-};
-
 type WebviewsListOptions = {
   sessionId: string;
   json: boolean;
@@ -362,8 +366,7 @@ const formatWebviewsTable = (targets: WebviewTarget[]) =>
 
 const runWebviewsList = async (args: string[]) => {
   const options = parseWebviewsListOptions(args);
-  const backend = await getBackendForSession(options.sessionId);
-  const targets = await backend.listWebviews(options.sessionId);
+  const targets = await listSessionWebviews(options.sessionId);
 
   if (options.json) {
     console.log(JSON.stringify(targets, null, 2));
@@ -443,8 +446,7 @@ const parseWebviewScreenshotOptions = (
 
 const runWebviewScreenshot = async (args: string[]) => {
   const options = parseWebviewScreenshotOptions(args);
-  const backend = await getBackendForSession(options.sessionId);
-  const artifact = await backend.captureWebviewScreenshot(
+  const artifact = await captureSessionWebviewScreenshot(
     options.sessionId,
     options.targetId,
     { outputPath: options.outputPath },
@@ -528,8 +530,7 @@ const parseJsEvalOptions = (args: string[]): JsEvalOptions => {
 
 const runJsEval = async (args: string[]) => {
   const options = parseJsEvalOptions(args);
-  const backend = await getBackendForSession(options.sessionId);
-  const result = await backend.evalJs(
+  const result = await evalSessionJs(
     options.sessionId,
     options.targetId,
     options.expression,
@@ -602,8 +603,10 @@ const parseTargetTailOptions = (args: string[]): TargetTailOptions => {
 
 const runConsoleTail = async (args: string[]) => {
   const options = parseTargetTailOptions(args);
-  const backend = await getBackendForSession(options.sessionId);
-  const stream = backend.streamConsole(options.sessionId, options.targetId);
+  const stream = await streamSessionConsole(
+    options.sessionId,
+    options.targetId,
+  );
 
   for await (const event of stream) {
     if (options.json) {
@@ -611,16 +614,16 @@ const runConsoleTail = async (args: string[]) => {
       continue;
     }
 
-    console.log(
-      `[${event.type}] ${event.args.join(" ")}`.trim(),
-    );
+    console.log(`[${event.type}] ${event.args.join(" ")}`.trim());
   }
 };
 
 const runNetworkTail = async (args: string[]) => {
   const options = parseTargetTailOptions(args);
-  const backend = await getBackendForSession(options.sessionId);
-  const stream = backend.streamNetwork(options.sessionId, options.targetId);
+  const stream = await streamSessionNetwork(
+    options.sessionId,
+    options.targetId,
+  );
 
   for await (const event of stream) {
     if (options.json) {
@@ -634,11 +637,15 @@ const runNetworkTail = async (args: string[]) => {
     }
 
     if (event.stage === "response") {
-      console.log(`[response] ${event.status ?? ""} ${event.method} ${event.url}`.trim());
+      console.log(
+        `[response] ${event.status ?? ""} ${event.method} ${event.url}`.trim(),
+      );
       continue;
     }
 
-    console.log(`[failed] ${event.method} ${event.url} ${event.errorText ?? ""}`.trim());
+    console.log(
+      `[failed] ${event.method} ${event.url} ${event.errorText ?? ""}`.trim(),
+    );
   }
 };
 
