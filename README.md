@@ -72,6 +72,12 @@ Example app-level scripts:
 }
 ```
 
+Publishing:
+
+- The repo includes GitHub Actions CI on pushes and pull requests.
+- npm publishing is set up as a tag-based workflow on `v*` tags.
+- To activate npm publishing, add an `NPM_TOKEN` repository secret in GitHub, then push a version tag such as `v0.1.0`.
+
 Current MCP tools:
 
 - `mobile_list_devices`
