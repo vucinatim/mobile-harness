@@ -1,5 +1,5 @@
 {
-  "name": "@zerodays/mobile-harness",
+  "name": "vucinatim-mobile-harness",
   "version": "0.1.0",
   "description": "Android-first mobile debugging harness with CLI and MCP surfaces for hybrid app WebViews.",
   "type": "module",
@@ -10,6 +10,7 @@
   },
   "files": [
     "android",
+    "bin",
     "cli",
     "core",
     "ios",
@@ -18,8 +19,8 @@
     "LICENSE"
   ],
   "bin": {
-    "mobile-harness": "./cli/index.ts",
-    "mobile-harness-mcp": "./mcp/server.ts"
+    "mobile-harness": "./bin/mobile-harness",
+    "mobile-harness-mcp": "./bin/mobile-harness-mcp"
   },
   "repository": {
     "type": "git",

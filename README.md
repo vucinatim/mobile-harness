@@ -32,6 +32,12 @@ Install from GitHub today:
 bun add -d github:vucinatim/mobile-harness
 ```
 
+Planned npm package name:
+
+```bash
+vucinatim-mobile-harness
+```
+
 Run:
 
 ```bash
@@ -76,6 +82,7 @@ Publishing:
 
 - The repo includes GitHub Actions CI on pushes and pull requests.
 - npm publishing is set up as a tag-based workflow on `v*` tags.
+- The intended npm package name is `vucinatim-mobile-harness`.
 - To activate npm publishing, add an `NPM_TOKEN` repository secret in GitHub, then push a version tag such as `v0.1.0`.
 
 Current MCP tools:
