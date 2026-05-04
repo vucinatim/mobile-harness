@@ -27,6 +27,8 @@ Usage:
   bun run mobile-harness screenshot --session <id> [--output <path>] [--json]
   bun run mobile-harness webviews list --session <id> [--json]
   bun run mobile-harness js eval --session <id> --target <id> --expression <code> [--json]
+  bun run mobile-harness console tail --session <id> --target <id> [--json]
+  bun run mobile-harness network tail --session <id> --target <id> [--json]
 
 Examples:
   bun run mobile-harness devices list
@@ -37,6 +39,8 @@ Examples:
   bun run mobile-harness screenshot --session <session-id>
   bun run mobile-harness webviews list --session <session-id>
   bun run mobile-harness js eval --session <session-id> --target <target-id> --expression "document.title"
+  bun run mobile-harness console tail --session <session-id> --target <target-id>
+  bun run mobile-harness network tail --session <session-id> --target <target-id>
 `);
 };
 
@@ -461,6 +465,101 @@ const runJsEval = async (args: string[]) => {
   );
 };
 
+type TargetTailOptions = {
+  sessionId: string;
+  targetId: string;
+  json: boolean;
+};
+
+const parseTargetTailOptions = (args: string[]): TargetTailOptions => {
+  let sessionId = "";
+  let targetId = "";
+  let json = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (arg === "--session") {
+      sessionId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--target") {
+      targetId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  if (!sessionId) {
+    throw new HarnessError(
+      "invalid_input",
+      "Missing required option --session <id>.",
+    );
+  }
+
+  if (!targetId) {
+    throw new HarnessError(
+      "invalid_input",
+      "Missing required option --target <id>.",
+    );
+  }
+
+  return { sessionId, targetId, json };
+};
+
+const runConsoleTail = async (args: string[]) => {
+  const options = parseTargetTailOptions(args);
+  const backend = await getBackendForSession(options.sessionId);
+  const stream = backend.streamConsole(options.sessionId, options.targetId);
+
+  for await (const event of stream) {
+    if (options.json) {
+      console.log(JSON.stringify(event));
+      continue;
+    }
+
+    console.log(
+      `[${event.type}] ${event.args.join(" ")}`.trim(),
+    );
+  }
+};
+
+const runNetworkTail = async (args: string[]) => {
+  const options = parseTargetTailOptions(args);
+  const backend = await getBackendForSession(options.sessionId);
+  const stream = backend.streamNetwork(options.sessionId, options.targetId);
+
+  for await (const event of stream) {
+    if (options.json) {
+      console.log(JSON.stringify(event));
+      continue;
+    }
+
+    if (event.stage === "request") {
+      console.log(`[request] ${event.method} ${event.url}`);
+      continue;
+    }
+
+    if (event.stage === "response") {
+      console.log(`[response] ${event.status ?? ""} ${event.method} ${event.url}`.trim());
+      continue;
+    }
+
+    console.log(`[failed] ${event.method} ${event.url} ${event.errorText ?? ""}`.trim());
+  }
+};
+
 const main = async () => {
   const args = process.argv.slice(2);
   const [command, subcommand] = args;
@@ -497,6 +596,16 @@ const main = async () => {
 
   if (command === "js" && subcommand === "eval") {
     await runJsEval(args.slice(2));
+    return;
+  }
+
+  if (command === "console" && subcommand === "tail") {
+    await runConsoleTail(args.slice(2));
+    return;
+  }
+
+  if (command === "network" && subcommand === "tail") {
+    await runNetworkTail(args.slice(2));
     return;
   }
 

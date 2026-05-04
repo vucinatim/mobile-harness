@@ -32,6 +32,8 @@ import {
 import {
   evaluateAndroidWebview,
   listAndroidWebviews,
+  streamAndroidConsole,
+  streamAndroidNetwork,
   validateAndroidWebviewTarget,
 } from "./cdp.ts";
 
@@ -162,20 +164,18 @@ export class AndroidHarnessBackend implements HarnessBackend {
   }
 
   async *streamConsole(
-    _sessionId: string,
-    _targetId: string,
+    sessionId: string,
+    targetId: string,
   ): AsyncIterable<ConsoleEvent> {
-    throw notImplemented(
-      "Android console streaming is not implemented yet. Phase 2 will add CDP console event support.",
-    );
+    const session = await loadSession(sessionId);
+    yield* streamAndroidConsole(session.deviceId, session.appId, targetId);
   }
 
   async *streamNetwork(
-    _sessionId: string,
-    _targetId: string,
+    sessionId: string,
+    targetId: string,
   ): AsyncIterable<NetworkEvent> {
-    throw notImplemented(
-      "Android network streaming is not implemented yet. Phase 2 will add CDP network event support.",
-    );
+    const session = await loadSession(sessionId);
+    yield* streamAndroidNetwork(session.deviceId, session.appId, targetId);
   }
 }

@@ -57,9 +57,11 @@ export type ConsoleEvent = {
 
 export type NetworkEvent = {
   id: string;
+  stage: "request" | "response" | "failed";
   method: string;
   url: string;
   status?: number;
+  errorText?: string;
 };
 
 export type EvalResult = {

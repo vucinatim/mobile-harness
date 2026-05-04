@@ -41,5 +41,7 @@ export const androidDeviceCapabilities = (): DeviceCapabilities => ({
   canListWebviews: true,
   canAttachWebview: true,
   canEvalJs: true,
+  canReadConsole: true,
+  canReadNetwork: true,
   canLaunchApp: true,
 });
