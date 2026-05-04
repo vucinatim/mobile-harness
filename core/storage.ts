@@ -1,0 +1,52 @@
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
+import { HarnessError } from "./errors.ts";
+import type { AppSession, Platform } from "./types.ts";
+
+type SessionRecord = AppSession & {
+  platform: Platform;
+};
+
+const harnessRoot = path.join(process.cwd(), ".mobile-harness");
+const sessionsDir = path.join(harnessRoot, "sessions");
+const artifactsDir = path.join(harnessRoot, "artifacts");
+
+const ensureDir = async (dirPath: string) => {
+  await mkdir(dirPath, { recursive: true });
+};
+
+const sessionFilePath = (sessionId: string) =>
+  path.join(sessionsDir, `${sessionId}.json`);
+
+export const ensureHarnessStorage = async () => {
+  await ensureDir(sessionsDir);
+  await ensureDir(artifactsDir);
+};
+
+export const saveSession = async (session: SessionRecord) => {
+  await ensureHarnessStorage();
+  await Bun.write(sessionFilePath(session.id), JSON.stringify(session, null, 2));
+};
+
+export const loadSession = async (sessionId: string): Promise<SessionRecord> => {
+  const file = Bun.file(sessionFilePath(sessionId));
+  if (!(await file.exists())) {
+    throw new HarnessError(
+      "invalid_input",
+      `Session "${sessionId}" was not found.`,
+      { sessionId },
+    );
+  }
+
+  return (await file.json()) as SessionRecord;
+};
+
+export const getArtifactPath = async (
+  sessionId: string,
+  filename: string,
+): Promise<string> => {
+  await ensureHarnessStorage();
+  const dir = path.join(artifactsDir, sessionId);
+  await ensureDir(dir);
+  return path.join(dir, filename);
+};
