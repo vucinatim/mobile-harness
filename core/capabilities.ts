@@ -38,5 +38,8 @@ export const androidDeviceCapabilities = (): DeviceCapabilities => ({
   canListDevices: true,
   canReadLogs: true,
   canCaptureScreenshot: true,
+  canListWebviews: true,
+  canAttachWebview: true,
+  canEvalJs: true,
   canLaunchApp: true,
 });

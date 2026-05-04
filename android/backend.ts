@@ -29,6 +29,11 @@ import {
   listAndroidDevices,
   spawnAndroidLogcat,
 } from "./adb.ts";
+import {
+  evaluateAndroidWebview,
+  listAndroidWebviews,
+  validateAndroidWebviewTarget,
+} from "./cdp.ts";
 
 export class AndroidHarnessBackend implements HarnessBackend {
   async listDevices(): Promise<DeviceSummary[]> {
@@ -128,25 +133,31 @@ export class AndroidHarnessBackend implements HarnessBackend {
     };
   }
 
-  async listWebviews(_sessionId: string): Promise<WebviewTarget[]> {
-    throw notImplemented(
-      "Android WebView discovery is not implemented yet. Phase 2 will add CDP target discovery.",
+  async listWebviews(sessionId: string): Promise<WebviewTarget[]> {
+    const session = await loadSession(sessionId);
+    return await listAndroidWebviews(
+      session.deviceId,
+      session.appId,
+      sessionId,
     );
   }
 
-  async attachWebview(_sessionId: string, _targetId: string): Promise<void> {
-    throw notImplemented(
-      "Android WebView attachment is not implemented yet. Phase 2 will add CDP attachment.",
-    );
+  async attachWebview(sessionId: string, targetId: string): Promise<void> {
+    const session = await loadSession(sessionId);
+    await validateAndroidWebviewTarget(session.deviceId, session.appId, targetId);
   }
 
   async evalJs(
-    _sessionId: string,
-    _targetId: string,
-    _expression: string,
+    sessionId: string,
+    targetId: string,
+    expression: string,
   ): Promise<EvalResult> {
-    throw notImplemented(
-      "Android JavaScript evaluation is not implemented yet. Phase 2 will add CDP Runtime.evaluate support.",
+    const session = await loadSession(sessionId);
+    return await evaluateAndroidWebview(
+      session.deviceId,
+      session.appId,
+      targetId,
+      expression,
     );
   }
 

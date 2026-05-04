@@ -19,7 +19,7 @@ const getAdbPath = (): string => {
   return adbPath;
 };
 
-const runAdb = (args: string[]): string => {
+export const runAdbCommand = (args: string[]): string => {
   const adbPath = getAdbPath();
   const result = Bun.spawnSync([adbPath, ...args], {
     stdout: "pipe",
@@ -39,7 +39,7 @@ const runAdb = (args: string[]): string => {
 };
 
 const runAdbForDevice = (deviceId: string, args: string[]): string => {
-  return runAdb(["-s", deviceId, ...args]);
+  return runAdbCommand(["-s", deviceId, ...args]);
 };
 
 const tryRunAdbForDevice = (
@@ -114,7 +114,7 @@ const parseDeviceLine = (line: string): AdbDeviceLine | null => {
 };
 
 export const listAndroidDevices = async (): Promise<DeviceSummary[]> => {
-  const output = runAdb(["devices", "-l"]);
+  const output = runAdbCommand(["devices", "-l"]);
   const lines = output
     .split("\n")
     .slice(1)
@@ -130,6 +130,14 @@ export const listAndroidDevices = async (): Promise<DeviceSummary[]> => {
     state: device.state,
     capabilities: androidDeviceCapabilities(),
   }));
+};
+
+export const removeAdbForward = (deviceId: string, localPort: number) => {
+  try {
+    runAdbCommand(["-s", deviceId, "forward", "--remove", `tcp:${localPort}`]);
+  } catch {
+    // Ignore cleanup failures for ephemeral forwarded ports.
+  }
 };
 
 export const getAndroidDevice = async (
