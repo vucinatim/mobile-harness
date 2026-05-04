@@ -4,13 +4,40 @@
   "description": "Android-first mobile debugging harness with CLI and MCP surfaces for hybrid app WebViews.",
   "type": "module",
   "private": false,
+  "license": "MIT",
   "engines": {
     "bun": ">=1.2.0"
   },
+  "files": [
+    "android",
+    "cli",
+    "core",
+    "ios",
+    "mcp",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "mobile-harness": "./cli/index.ts",
     "mobile-harness-mcp": "./mcp/server.ts"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vucinatim/mobile-harness.git"
+  },
+  "homepage": "https://github.com/vucinatim/mobile-harness#readme",
+  "bugs": {
+    "url": "https://github.com/vucinatim/mobile-harness/issues"
+  },
+  "keywords": [
+    "android",
+    "capacitor",
+    "cdp",
+    "devtools",
+    "mcp",
+    "mobile",
+    "webview"
+  ],
   "scripts": {
     "mobile-harness": "bun run ./cli/index.ts",
     "mobile-harness:mcp": "bun run ./mcp/server.ts",
