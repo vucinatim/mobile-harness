@@ -26,6 +26,12 @@ Current scaffold status:
 - iOS backend stub
 - MCP server with bounded agent-facing read tools
 
+Install from GitHub today:
+
+```bash
+bun add -d github:vucinatim/mobile-harness
+```
+
 Run:
 
 ```bash
@@ -49,20 +55,19 @@ mobile-harness-mcp
 Local development in another app repo:
 
 ```bash
-cd /path/to/mobile-harness
-bun install
-
 cd /path/to/your-app
-bun add -d link:../mobile-harness
+MOBILE_HARNESS_PATH=../mobile-harness bun run mobile-harness devices list
 ```
 
-Then expose stable app-level scripts that do not care whether the package is linked locally or installed from npm later:
+The cleanest consumer pattern is a thin wrapper script that prefers a local checkout when present and otherwise falls back to the installed package. That gives you instant updates during parallel development without committing machine-local link dependencies.
+
+Example app-level scripts:
 
 ```json
 {
   "scripts": {
-    "mobile-harness": "mobile-harness",
-    "mobile-harness:mcp": "mobile-harness-mcp"
+    "mobile-harness": "bash scripts/mobile-harness.sh",
+    "mobile-harness:mcp": "bash scripts/mobile-harness-mcp.sh"
   }
 }
 ```
