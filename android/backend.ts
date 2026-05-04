@@ -1,6 +1,6 @@
 import type { HarnessBackend } from "../core/backend.ts";
 import { androidDeviceCapabilities } from "../core/capabilities.ts";
-import { HarnessError, notImplemented } from "../core/errors.ts";
+import { HarnessError } from "../core/errors.ts";
 import { readLines } from "../core/stream.ts";
 import {
   getArtifactPath,
@@ -20,6 +20,18 @@ import type {
   TailLogsOptions,
   WebviewTarget,
 } from "../core/types.ts";
+import type {
+  UiActionResult,
+  UiInspectResult,
+  UiPressOptions,
+  UiReadResult,
+  UiSelector,
+  UiSnapshot,
+  UiSnapshotOptions,
+  UiTypeOptions,
+  UiWaitCondition,
+  UiWaitResult,
+} from "../core/ui-types.ts";
 import type { DeviceCapabilities } from "../core/capabilities.ts";
 import {
   captureAndroidDeviceScreenshot,
@@ -37,6 +49,16 @@ import {
   streamAndroidNetwork,
   validateAndroidWebviewTarget,
 } from "./cdp.ts";
+import {
+  clearAndroidUi,
+  clickAndroidUi,
+  inspectAndroidUi,
+  pressAndroidUi,
+  readAndroidUi,
+  snapshotAndroidUi,
+  typeIntoAndroidUi,
+  waitForAndroidUi,
+} from "./ui.ts";
 
 export class AndroidHarnessBackend implements HarnessBackend {
   async listDevices(): Promise<DeviceSummary[]> {
@@ -208,5 +230,123 @@ export class AndroidHarnessBackend implements HarnessBackend {
   ): AsyncIterable<NetworkEvent> {
     const session = await loadSession(sessionId);
     yield* streamAndroidNetwork(session.deviceId, session.appId, targetId);
+  }
+
+  async snapshotUi(
+    sessionId: string,
+    targetId: string,
+    options?: UiSnapshotOptions,
+  ): Promise<UiSnapshot> {
+    const session = await loadSession(sessionId);
+    return await snapshotAndroidUi(
+      session.deviceId,
+      session.appId,
+      targetId,
+      options,
+    );
+  }
+
+  async inspectUi(
+    sessionId: string,
+    targetId: string,
+    selector: UiSelector,
+  ): Promise<UiInspectResult> {
+    const session = await loadSession(sessionId);
+    return await inspectAndroidUi(
+      session.deviceId,
+      session.appId,
+      targetId,
+      selector,
+    );
+  }
+
+  async clickUi(
+    sessionId: string,
+    targetId: string,
+    selector: UiSelector,
+  ): Promise<UiActionResult> {
+    const session = await loadSession(sessionId);
+    return await clickAndroidUi(
+      session.deviceId,
+      session.appId,
+      targetId,
+      selector,
+    );
+  }
+
+  async typeIntoUi(
+    sessionId: string,
+    targetId: string,
+    selector: UiSelector,
+    text: string,
+    options?: UiTypeOptions,
+  ): Promise<UiActionResult> {
+    const session = await loadSession(sessionId);
+    return await typeIntoAndroidUi(
+      session.deviceId,
+      session.appId,
+      targetId,
+      selector,
+      text,
+      options,
+    );
+  }
+
+  async clearUi(
+    sessionId: string,
+    targetId: string,
+    selector: UiSelector,
+  ): Promise<UiActionResult> {
+    const session = await loadSession(sessionId);
+    return await clearAndroidUi(
+      session.deviceId,
+      session.appId,
+      targetId,
+      selector,
+    );
+  }
+
+  async pressUi(
+    sessionId: string,
+    targetId: string,
+    selector: UiSelector,
+    options: UiPressOptions,
+  ): Promise<UiActionResult> {
+    const session = await loadSession(sessionId);
+    return await pressAndroidUi(
+      session.deviceId,
+      session.appId,
+      targetId,
+      selector,
+      options,
+    );
+  }
+
+  async readUi(
+    sessionId: string,
+    targetId: string,
+    selector: UiSelector,
+  ): Promise<UiReadResult> {
+    const session = await loadSession(sessionId);
+    return await readAndroidUi(
+      session.deviceId,
+      session.appId,
+      targetId,
+      selector,
+    );
+  }
+
+  async waitForUi(
+    sessionId: string,
+    targetId: string,
+    condition: UiWaitCondition,
+  ): Promise<UiWaitResult> {
+    const session = await loadSession(sessionId);
+    return await waitForAndroidUi(
+      session.deviceId,
+      session.appId,
+      targetId,
+      condition,
+    );
   }
 }

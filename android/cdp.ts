@@ -184,6 +184,7 @@ const evaluateOverWebSocket = (
           params: {
             expression,
             returnByValue: true,
+            awaitPromise: true,
           },
         }),
       );

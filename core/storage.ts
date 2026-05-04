@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import { HarnessError } from "./errors.ts";
 import type { AppSession, Platform } from "./types.ts";
@@ -39,6 +39,24 @@ export const loadSession = async (sessionId: string): Promise<SessionRecord> => 
   }
 
   return (await file.json()) as SessionRecord;
+};
+
+export const listSessions = async (): Promise<SessionRecord[]> => {
+  await ensureHarnessStorage();
+  const entries = await readdir(sessionsDir, { withFileTypes: true });
+  const sessions = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => {
+        const file = Bun.file(path.join(sessionsDir, entry.name));
+        return (await file.json()) as SessionRecord;
+      }),
+  );
+
+  return sessions.sort(
+    (left, right) =>
+      new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime(),
+  );
 };
 
 export const getArtifactPath = async (

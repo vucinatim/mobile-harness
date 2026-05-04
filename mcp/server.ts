@@ -1,14 +1,20 @@
-#!/usr/bin/env bun
-
 import { z } from "zod";
 import { HarnessError } from "../core/errors.ts";
 import {
   captureSessionWebviewScreenshot,
+  clearSessionUi,
+  clickSessionUi,
   evalSessionJs,
+  inspectSessionUi,
   listSessionWebviews,
+  pressSessionUi,
   readSessionConsole,
   readSessionLogs,
   readSessionNetwork,
+  readSessionUi,
+  snapshotSessionUi,
+  typeIntoSessionUi,
+  waitForSessionUi,
 } from "../core/operations.ts";
 import {
   captureSessionScreenshot,
@@ -41,7 +47,7 @@ const defineTool = <const Name extends string, Schema extends z.ZodType>(
 
 type AnyToolDefinition = ToolDefinition<string, z.ZodTypeAny>;
 
-const SERVER_NAME = "mobile-harness";
+const SERVER_NAME = "classology-mobile-harness";
 const SERVER_VERSION = "0.1.0";
 const JSON_RPC_VERSION = "2.0";
 const SUPPORTED_PROTOCOL_VERSIONS = [
@@ -57,6 +63,47 @@ const boundedReadSchema = z.object({
   maxEvents: z.number().int().min(1).max(200).optional(),
   timeoutMs: z.number().int().min(100).max(10_000).optional(),
 });
+
+const uiRoleSchema = z.enum([
+  "button",
+  "link",
+  "tab",
+  "back",
+  "input",
+  "textarea",
+  "select",
+  "checkbox",
+  "radio",
+  "text",
+  "dialog",
+  "unknown",
+]);
+
+const uiSnapshotDetailSchema = z.enum(["summary", "standard", "full"]);
+
+const uiSelectorSchema = z
+  .object({
+    elementId: z.string().min(1).optional(),
+    selector: z.string().min(1).optional(),
+    text: z.string().min(1).optional(),
+    role: uiRoleSchema.optional(),
+    name: z.string().min(1).optional(),
+    placeholder: z.string().min(1).optional(),
+  })
+  .refine(
+    (value) =>
+      !!(
+        value.elementId ||
+        value.selector ||
+        value.text ||
+        value.name ||
+        value.placeholder
+      ),
+    {
+      message:
+        "At least one selector field is required: elementId, selector, text, name, or placeholder.",
+    },
+  );
 
 const tools = [
   defineTool({
@@ -152,7 +199,7 @@ const tools = [
     description:
       "List debuggable WebView targets for an attached mobile app session.",
     inputSchema: z.object({
-      sessionId: z.string().min(1),
+      sessionId: z.string().min(1).optional(),
     }),
     async execute(input) {
       const targets = await listSessionWebviews(input.sessionId);
@@ -174,8 +221,8 @@ const tools = [
     description:
       "Evaluate a JavaScript expression inside a debuggable WebView target.",
     inputSchema: z.object({
-      sessionId: z.string().min(1),
-      targetId: z.string().min(1),
+      sessionId: z.string().min(1).optional(),
+      targetId: z.string().min(1).optional(),
       expression: z.string().min(1),
     }),
     async execute(input) {
@@ -200,8 +247,8 @@ const tools = [
     description:
       "Capture a screenshot of a specific debuggable WebView target.",
     inputSchema: z.object({
-      sessionId: z.string().min(1),
-      targetId: z.string().min(1),
+      sessionId: z.string().min(1).optional(),
+      targetId: z.string().min(1).optional(),
       outputPath: z.string().min(1).optional(),
     }),
     async execute(input) {
@@ -249,8 +296,8 @@ const tools = [
       "Read a bounded batch of WebView console events from a target in an attached mobile session.",
     inputSchema: z
       .object({
-        sessionId: z.string().min(1),
-        targetId: z.string().min(1),
+        sessionId: z.string().min(1).optional(),
+        targetId: z.string().min(1).optional(),
       })
       .extend(boundedReadSchema.shape),
     async execute(input) {
@@ -276,8 +323,8 @@ const tools = [
       "Read a bounded batch of WebView network events from a target in an attached mobile session.",
     inputSchema: z
       .object({
-        sessionId: z.string().min(1),
-        targetId: z.string().min(1),
+        sessionId: z.string().min(1).optional(),
+        targetId: z.string().min(1).optional(),
       })
       .extend(boundedReadSchema.shape),
     async execute(input) {
@@ -294,6 +341,212 @@ const tools = [
           targetId: input.targetId,
           events,
         },
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_ui_snapshot",
+    description:
+      "Return a compact, agent-usable snapshot of the current mobile WebView UI.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1).optional(),
+      targetId: z.string().min(1).optional(),
+      detail: uiSnapshotDetailSchema.optional(),
+    }),
+    async execute(input) {
+      const result = await snapshotSessionUi(input.sessionId, input.targetId, {
+        detail: input.detail,
+      });
+
+      return {
+        text: `Captured a UI snapshot from target ${result.targetId}.`,
+        structuredContent: result,
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_ui_inspect",
+    description:
+      "Inspect a single visible UI element in the current mobile WebView and return targeted details without expanding the full screen snapshot.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1).optional(),
+      targetId: z.string().min(1).optional(),
+      selector: uiSelectorSchema,
+    }),
+    async execute(input) {
+      const result = await inspectSessionUi(
+        input.selector,
+        input.sessionId,
+        input.targetId,
+      );
+
+      return {
+        text: `Inspected a UI element in target ${result.targetId}.`,
+        structuredContent: result,
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_ui_click",
+    description:
+      "Click a visible UI element in the current mobile WebView using a stable element id or selector hints.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1).optional(),
+      targetId: z.string().min(1).optional(),
+      selector: uiSelectorSchema,
+    }),
+    async execute(input) {
+      const result = await clickSessionUi(
+        input.selector,
+        input.sessionId,
+        input.targetId,
+      );
+
+      return {
+        text: `Clicked a UI element in target ${result.targetId}.`,
+        structuredContent: result,
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_ui_type",
+    description:
+      "Type into a visible UI field in the current mobile WebView using a stable element id or selector hints.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1).optional(),
+      targetId: z.string().min(1).optional(),
+      selector: uiSelectorSchema,
+      text: z.string(),
+      append: z.boolean().optional(),
+      submit: z.boolean().optional(),
+    }),
+    async execute(input) {
+      const result = await typeIntoSessionUi(
+        input.selector,
+        input.text,
+        input.sessionId,
+        input.targetId,
+        {
+          append: input.append,
+          submit: input.submit,
+        },
+      );
+
+      return {
+        text: `Typed into a UI field in target ${result.targetId}.`,
+        structuredContent: result,
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_ui_clear",
+    description:
+      "Clear a visible UI field in the current mobile WebView using a stable element id or selector hints.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1).optional(),
+      targetId: z.string().min(1).optional(),
+      selector: uiSelectorSchema,
+    }),
+    async execute(input) {
+      const result = await clearSessionUi(
+        input.selector,
+        input.sessionId,
+        input.targetId,
+      );
+
+      return {
+        text: `Cleared a UI field in target ${result.targetId}.`,
+        structuredContent: result,
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_ui_press",
+    description:
+      "Press a keyboard key on a visible UI element in the current mobile WebView.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1).optional(),
+      targetId: z.string().min(1).optional(),
+      selector: uiSelectorSchema,
+      key: z.string().min(1),
+      code: z.string().min(1).optional(),
+    }),
+    async execute(input) {
+      const result = await pressSessionUi(
+        input.selector,
+        {
+          key: input.key,
+          code: input.code,
+        },
+        input.sessionId,
+        input.targetId,
+      );
+
+      return {
+        text: `Pressed ${input.key} on a UI element in target ${result.targetId}.`,
+        structuredContent: result,
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_ui_read",
+    description:
+      "Read the current state of a visible UI element in the current mobile WebView.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1).optional(),
+      targetId: z.string().min(1).optional(),
+      selector: uiSelectorSchema,
+    }),
+    async execute(input) {
+      const result = await readSessionUi(
+        input.selector,
+        input.sessionId,
+        input.targetId,
+      );
+
+      return {
+        text: `Read a UI element from target ${result.targetId}.`,
+        structuredContent: result,
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_ui_wait_for",
+    description:
+      "Wait for a UI condition such as text, URL, or an element state in the current mobile WebView.",
+    inputSchema: z
+      .object({
+        sessionId: z.string().min(1).optional(),
+        targetId: z.string().min(1).optional(),
+        element: uiSelectorSchema.optional(),
+        text: z.string().min(1).optional(),
+        urlIncludes: z.string().min(1).optional(),
+        state: z.enum(["visible", "hidden", "enabled", "disabled"]).optional(),
+        timeoutMs: z.number().int().min(100).max(30_000).optional(),
+        intervalMs: z.number().int().min(25).max(1_000).optional(),
+      })
+      .refine((value) => !!(value.element || value.text || value.urlIncludes), {
+        message: "element, text, or urlIncludes is required.",
+      }),
+    async execute(input) {
+      const result = await waitForSessionUi(
+        {
+          element: input.element,
+          text: input.text,
+          urlIncludes: input.urlIncludes,
+          state: input.state,
+          timeoutMs: input.timeoutMs,
+          intervalMs: input.intervalMs,
+        },
+        input.sessionId,
+        input.targetId,
+      );
+
+      return {
+        text: result.result.satisfied
+          ? `UI condition satisfied in target ${result.targetId}.`
+          : `UI condition timed out in target ${result.targetId}.`,
+        structuredContent: result,
       };
     },
   }),
@@ -430,7 +683,7 @@ const handleInitialize = async (id: JsonRpcId, params: unknown) => {
         version: SERVER_VERSION,
       },
       instructions:
-        "Android-first mobile debugging harness. Use device and session tools first, then WebView tools once a session is attached.",
+        "Android-first mobile debugging harness for Classology. Use device/session tools first, then WebView tools once a session is attached.",
     }),
   );
 };
@@ -576,13 +829,11 @@ const main = async () => {
   }
 };
 
-if (import.meta.main) {
-  try {
-    await main();
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unhandled MCP server error.";
-    console.error(message);
-    process.exitCode = 1;
-  }
+try {
+  await main();
+} catch (error) {
+  const message =
+    error instanceof Error ? error.message : "Unhandled MCP server error.";
+  console.error(message);
+  process.exitCode = 1;
 }

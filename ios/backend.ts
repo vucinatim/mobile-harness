@@ -15,6 +15,18 @@ import type {
   WebviewTarget,
 } from "../core/types.ts";
 import type { DeviceCapabilities } from "../core/capabilities.ts";
+import type {
+  UiActionResult,
+  UiInspectResult,
+  UiPressOptions,
+  UiReadResult,
+  UiSelector,
+  UiSnapshot,
+  UiSnapshotOptions,
+  UiTypeOptions,
+  UiWaitCondition,
+  UiWaitResult,
+} from "../core/ui-types.ts";
 
 export class IOSHarnessBackend implements HarnessBackend {
   async listDevices(): Promise<DeviceSummary[]> {
@@ -78,6 +90,73 @@ export class IOSHarnessBackend implements HarnessBackend {
     _sessionId: string,
     _targetId: string,
   ): AsyncIterable<NetworkEvent> {
+    throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
+  }
+
+  async snapshotUi(
+    _sessionId: string,
+    _targetId: string,
+    _options?: UiSnapshotOptions,
+  ): Promise<UiSnapshot> {
+    throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
+  }
+
+  async inspectUi(
+    _sessionId: string,
+    _targetId: string,
+    _selector: UiSelector,
+  ): Promise<UiInspectResult> {
+    throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
+  }
+
+  async clickUi(
+    _sessionId: string,
+    _targetId: string,
+    _selector: UiSelector,
+  ): Promise<UiActionResult> {
+    throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
+  }
+
+  async typeIntoUi(
+    _sessionId: string,
+    _targetId: string,
+    _selector: UiSelector,
+    _text: string,
+    _options?: UiTypeOptions,
+  ): Promise<UiActionResult> {
+    throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
+  }
+
+  async clearUi(
+    _sessionId: string,
+    _targetId: string,
+    _selector: UiSelector,
+  ): Promise<UiActionResult> {
+    throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
+  }
+
+  async pressUi(
+    _sessionId: string,
+    _targetId: string,
+    _selector: UiSelector,
+    _options: UiPressOptions,
+  ): Promise<UiActionResult> {
+    throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
+  }
+
+  async readUi(
+    _sessionId: string,
+    _targetId: string,
+    _selector: UiSelector,
+  ): Promise<UiReadResult> {
+    throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
+  }
+
+  async waitForUi(
+    _sessionId: string,
+    _targetId: string,
+    _condition: UiWaitCondition,
+  ): Promise<UiWaitResult> {
     throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
   }
 }

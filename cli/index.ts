@@ -1,25 +1,34 @@
-#!/usr/bin/env bun
-
 import { HarnessError } from "../core/errors.ts";
 import {
   captureSessionWebviewScreenshot,
+  clearSessionUi,
+  clickSessionUi,
   evalSessionJs,
+  inspectSessionUi,
   listSessionWebviews,
+  pressSessionUi,
+  readSessionUi,
+  resolveSessionId,
+  snapshotSessionUi,
   streamSessionConsole,
   streamSessionNetwork,
+  typeIntoSessionUi,
+  waitForSessionUi,
 } from "../core/operations.ts";
-import {
-  captureSessionScreenshot,
-  createSession,
-  listDevices,
-  parsePlatform,
-  tailSessionLogs,
-} from "../core/registry.ts";
+import { createSession, listDevices, parsePlatform } from "../core/registry.ts";
+import { captureSessionScreenshot, tailSessionLogs } from "../core/registry.ts";
 import type {
   AppSession,
   DeviceSummary,
   WebviewTarget,
 } from "../core/types.ts";
+import type {
+  UiElementSnapshot,
+  UiSelector,
+  UiSnapshot,
+  UiSnapshotDetail,
+  UiWaitCondition,
+} from "../core/ui-types.ts";
 
 type ExplicitPlatform = Exclude<ReturnType<typeof parsePlatform>, "all">;
 
@@ -32,28 +41,27 @@ const printHelp = () => {
   console.log(`Mobile Harness
 
 Usage:
-  mobile-harness devices list [--platform android|ios|all] [--json]
-  mobile-harness session attach --platform android --device <serial> --app <appId> [--launch] [--json]
-  mobile-harness logs tail --session <id> [--filter <text>]
-  mobile-harness screenshot --session <id> [--output <path>] [--json]
-  mobile-harness webviews list --session <id> [--json]
-  mobile-harness webviews screenshot --session <id> --target <id> [--output <path>] [--json]
-  mobile-harness js eval --session <id> --target <id> --expression <code> [--json]
-  mobile-harness console tail --session <id> --target <id> [--json]
-  mobile-harness network tail --session <id> --target <id> [--json]
+  bun run mobile-harness devices list [--platform android|ios|all] [--json]
+  bun run mobile-harness session attach --platform android --device <serial> --app <appId> [--launch] [--json]
+  bun run mobile-harness logs tail [--session <id>] [--filter <text>]
+  bun run mobile-harness screenshot [--session <id>] [--output <path>] [--json]
+  bun run mobile-harness webviews list [--session <id>] [--json]
+  bun run mobile-harness webviews screenshot [--session <id>] [--target <id>] [--output <path>] [--json]
+  bun run mobile-harness js eval [--session <id>] [--target <id>] --expression <code> [--json]
+  bun run mobile-harness console tail [--session <id>] [--target <id>] [--json]
+  bun run mobile-harness network tail [--session <id>] [--target <id>] [--json]
+  bun run mobile-harness ui snapshot [--session <id>] [--target <id>] [--detail summary|standard|full] [--json]
+  bun run mobile-harness ui inspect [--session <id>] [--target <id>] (--element <id> | --text <text> | --name <name> | --placeholder <text> | --selector <css>) [--role <role>] [--json]
+  bun run mobile-harness ui click [--session <id>] [--target <id>] (--element <id> | --text <text> | --name <name> | --placeholder <text> | --selector <css>) [--role <role>] [--json]
+  bun run mobile-harness ui type [--session <id>] [--target <id>] (--element <id> | --name <name> | --placeholder <text> | --selector <css>) --text <value> [--append] [--submit] [--json]
+  bun run mobile-harness ui clear [--session <id>] [--target <id>] (--element <id> | --name <name> | --placeholder <text> | --selector <css>) [--json]
+  bun run mobile-harness ui press [--session <id>] [--target <id>] (--element <id> | --text <text> | --name <name> | --placeholder <text> | --selector <css>) --key <key> [--code <code>] [--json]
+  bun run mobile-harness ui read [--session <id>] [--target <id>] (--element <id> | --text <text> | --name <name> | --placeholder <text> | --selector <css>) [--role <role>] [--json]
+  bun run mobile-harness ui wait-for [--session <id>] [--target <id>] [--text <text> | --url <substring> | selector flags] [--state visible|hidden|enabled|disabled] [--timeout <ms>] [--interval <ms>] [--json]
 
-Examples:
-  mobile-harness devices list
-  mobile-harness devices list --platform android
-  mobile-harness devices list --json
-  mobile-harness session attach --platform android --device emulator-5554 --app com.example.app --launch
-  mobile-harness logs tail --session <session-id>
-  mobile-harness screenshot --session <session-id>
-  mobile-harness webviews list --session <session-id>
-  mobile-harness webviews screenshot --session <session-id> --target <target-id>
-  mobile-harness js eval --session <session-id> --target <target-id> --expression "document.title"
-  mobile-harness console tail --session <session-id> --target <target-id>
-  mobile-harness network tail --session <session-id> --target <target-id>
+Notes:
+  Session defaults to the most recent attached session when omitted.
+  WebView target defaults to the single attached or only available target when omitted.
 `);
 };
 
@@ -70,8 +78,7 @@ const parseOptions = (args: string[]): CommandOptions => {
     }
 
     if (arg === "--platform") {
-      const value = args[index + 1];
-      platform = parsePlatform(value);
+      platform = parsePlatform(args[index + 1]);
       index += 1;
       continue;
     }
@@ -210,13 +217,44 @@ const runSessionAttach = async (args: string[]) => {
   printSession(session);
 };
 
+type SessionRefOptions = {
+  sessionId?: string;
+  json: boolean;
+};
+
+const parseSessionRefOptions = (args: string[]): SessionRefOptions => {
+  let sessionId: string | undefined;
+  let json = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (arg === "--session") {
+      sessionId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  return { sessionId, json };
+};
+
 type TailLogsCliOptions = {
-  sessionId: string;
+  sessionId?: string;
   filter?: string;
 };
 
 const parseTailLogsOptions = (args: string[]): TailLogsCliOptions => {
-  let sessionId = "";
+  let sessionId: string | undefined;
   let filter: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -239,19 +277,13 @@ const parseTailLogsOptions = (args: string[]): TailLogsCliOptions => {
     });
   }
 
-  if (!sessionId) {
-    throw new HarnessError(
-      "invalid_input",
-      "Missing required option --session <id>.",
-    );
-  }
-
   return { sessionId, filter };
 };
 
 const runLogsTail = async (args: string[]) => {
   const options = parseTailLogsOptions(args);
-  const stream = await tailSessionLogs(options.sessionId, {
+  const resolvedSessionId = await resolveSessionId(options.sessionId);
+  const stream = await tailSessionLogs(resolvedSessionId, {
     filter: options.filter,
   });
 
@@ -261,13 +293,13 @@ const runLogsTail = async (args: string[]) => {
 };
 
 type ScreenshotCliOptions = {
-  sessionId: string;
+  sessionId?: string;
   outputPath?: string;
   json: boolean;
 };
 
 const parseScreenshotOptions = (args: string[]): ScreenshotCliOptions => {
-  let sessionId = "";
+  let sessionId: string | undefined;
   let outputPath: string | undefined;
   let json = false;
 
@@ -296,19 +328,13 @@ const parseScreenshotOptions = (args: string[]): ScreenshotCliOptions => {
     });
   }
 
-  if (!sessionId) {
-    throw new HarnessError(
-      "invalid_input",
-      "Missing required option --session <id>.",
-    );
-  }
-
   return { sessionId, outputPath, json };
 };
 
 const runScreenshot = async (args: string[]) => {
   const options = parseScreenshotOptions(args);
-  const artifact = await captureSessionScreenshot(options.sessionId, {
+  const resolvedSessionId = await resolveSessionId(options.sessionId);
+  const artifact = await captureSessionScreenshot(resolvedSessionId, {
     outputPath: options.outputPath,
   });
 
@@ -320,13 +346,42 @@ const runScreenshot = async (args: string[]) => {
   console.log(`Saved screenshot to ${artifact.path}`);
 };
 
-type WebviewsListOptions = {
-  sessionId: string;
+const formatWebviewsTable = (targets: WebviewTarget[]) =>
+  targets.map((target) => ({
+    id: target.id,
+    attached: target.attached,
+    title: target.title ?? "",
+    url: target.url ?? "",
+  }));
+
+const runWebviewsList = async (args: string[]) => {
+  const options = parseSessionRefOptions(args);
+  const targets = await listSessionWebviews(options.sessionId);
+
+  if (options.json) {
+    console.log(JSON.stringify(targets, null, 2));
+    return;
+  }
+
+  if (targets.length === 0) {
+    console.log("No WebView targets found.");
+    return;
+  }
+
+  console.table(formatWebviewsTable(targets));
+};
+
+type TargetRefOptions = {
+  sessionId?: string;
+  targetId?: string;
+  detail?: UiSnapshotDetail;
   json: boolean;
 };
 
-const parseWebviewsListOptions = (args: string[]): WebviewsListOptions => {
-  let sessionId = "";
+const parseTargetRefOptions = (args: string[]): TargetRefOptions => {
+  let sessionId: string | undefined;
+  let targetId: string | undefined;
+  let detail: UiSnapshotDetail | undefined;
   let json = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -343,58 +398,36 @@ const parseWebviewsListOptions = (args: string[]): WebviewsListOptions => {
       continue;
     }
 
+    if (arg === "--target") {
+      targetId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--detail") {
+      const value = args[index + 1] ?? "";
+      if (value !== "summary" && value !== "standard" && value !== "full") {
+        throw new HarnessError(
+          "invalid_input",
+          'Invalid --detail value. Use "summary", "standard", or "full".',
+        );
+      }
+      detail = value;
+      index += 1;
+      continue;
+    }
+
     throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
       arg,
     });
   }
 
-  if (!sessionId) {
-    throw new HarnessError(
-      "invalid_input",
-      "Missing required option --session <id>.",
-    );
-  }
-
-  return { sessionId, json };
+  return { sessionId, targetId, detail, json };
 };
 
-const formatWebviewsTable = (targets: WebviewTarget[]) =>
-  targets.map((target) => ({
-    id: target.id,
-    attached: target.attached,
-    title: target.title ?? "",
-    url: target.url ?? "",
-  }));
-
-const runWebviewsList = async (args: string[]) => {
-  const options = parseWebviewsListOptions(args);
-  const targets = await listSessionWebviews(options.sessionId);
-
-  if (options.json) {
-    console.log(JSON.stringify(targets, null, 2));
-    return;
-  }
-
-  if (targets.length === 0) {
-    console.log("No WebView targets found.");
-    return;
-  }
-
-  console.table(formatWebviewsTable(targets));
-};
-
-type WebviewScreenshotOptions = {
-  sessionId: string;
-  targetId: string;
-  outputPath?: string;
-  json: boolean;
-};
-
-const parseWebviewScreenshotOptions = (
-  args: string[],
-): WebviewScreenshotOptions => {
-  let sessionId = "";
-  let targetId = "";
+const runWebviewScreenshot = async (args: string[]) => {
+  let sessionId: string | undefined;
+  let targetId: string | undefined;
   let outputPath: string | undefined;
   let json = false;
 
@@ -429,32 +462,11 @@ const parseWebviewScreenshotOptions = (
     });
   }
 
-  if (!sessionId) {
-    throw new HarnessError(
-      "invalid_input",
-      "Missing required option --session <id>.",
-    );
-  }
+  const artifact = await captureSessionWebviewScreenshot(sessionId, targetId, {
+    outputPath,
+  });
 
-  if (!targetId) {
-    throw new HarnessError(
-      "invalid_input",
-      "Missing required option --target <id>.",
-    );
-  }
-
-  return { sessionId, targetId, outputPath, json };
-};
-
-const runWebviewScreenshot = async (args: string[]) => {
-  const options = parseWebviewScreenshotOptions(args);
-  const artifact = await captureSessionWebviewScreenshot(
-    options.sessionId,
-    options.targetId,
-    { outputPath: options.outputPath },
-  );
-
-  if (options.json) {
+  if (json) {
     console.log(JSON.stringify(artifact, null, 2));
     return;
   }
@@ -463,15 +475,15 @@ const runWebviewScreenshot = async (args: string[]) => {
 };
 
 type JsEvalOptions = {
-  sessionId: string;
-  targetId: string;
+  sessionId?: string;
+  targetId?: string;
   expression: string;
   json: boolean;
 };
 
 const parseJsEvalOptions = (args: string[]): JsEvalOptions => {
-  let sessionId = "";
-  let targetId = "";
+  let sessionId: string | undefined;
+  let targetId: string | undefined;
   let expression = "";
   let json = false;
 
@@ -506,20 +518,6 @@ const parseJsEvalOptions = (args: string[]): JsEvalOptions => {
     });
   }
 
-  if (!sessionId) {
-    throw new HarnessError(
-      "invalid_input",
-      "Missing required option --session <id>.",
-    );
-  }
-
-  if (!targetId) {
-    throw new HarnessError(
-      "invalid_input",
-      "Missing required option --target <id>.",
-    );
-  }
-
   if (!expression) {
     throw new HarnessError(
       "invalid_input",
@@ -550,65 +548,9 @@ const runJsEval = async (args: string[]) => {
   );
 };
 
-type TargetTailOptions = {
-  sessionId: string;
-  targetId: string;
-  json: boolean;
-};
-
-const parseTargetTailOptions = (args: string[]): TargetTailOptions => {
-  let sessionId = "";
-  let targetId = "";
-  let json = false;
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === "--json") {
-      json = true;
-      continue;
-    }
-
-    if (arg === "--session") {
-      sessionId = args[index + 1] ?? "";
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--target") {
-      targetId = args[index + 1] ?? "";
-      index += 1;
-      continue;
-    }
-
-    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
-      arg,
-    });
-  }
-
-  if (!sessionId) {
-    throw new HarnessError(
-      "invalid_input",
-      "Missing required option --session <id>.",
-    );
-  }
-
-  if (!targetId) {
-    throw new HarnessError(
-      "invalid_input",
-      "Missing required option --target <id>.",
-    );
-  }
-
-  return { sessionId, targetId, json };
-};
-
 const runConsoleTail = async (args: string[]) => {
-  const options = parseTargetTailOptions(args);
-  const stream = await streamSessionConsole(
-    options.sessionId,
-    options.targetId,
-  );
+  const options = parseTargetRefOptions(args);
+  const stream = await streamSessionConsole(options.sessionId, options.targetId);
 
   for await (const event of stream) {
     if (options.json) {
@@ -621,11 +563,8 @@ const runConsoleTail = async (args: string[]) => {
 };
 
 const runNetworkTail = async (args: string[]) => {
-  const options = parseTargetTailOptions(args);
-  const stream = await streamSessionNetwork(
-    options.sessionId,
-    options.targetId,
-  );
+  const options = parseTargetRefOptions(args);
+  const stream = await streamSessionNetwork(options.sessionId, options.targetId);
 
   for await (const event of stream) {
     if (options.json) {
@@ -651,9 +590,529 @@ const runNetworkTail = async (args: string[]) => {
   }
 };
 
+type UiSelectorOptions = {
+  selector: UiSelector;
+  json: boolean;
+  sessionId?: string;
+  targetId?: string;
+};
+
+const parseUiSelectorOptions = (
+  args: string[],
+  options?: {
+    allowText?: boolean;
+  },
+): UiSelectorOptions => {
+  let sessionId: string | undefined;
+  let targetId: string | undefined;
+  let json = false;
+  let elementId: string | undefined;
+  let selector: string | undefined;
+  let text: string | undefined;
+  let role: UiSelector["role"];
+  let name: string | undefined;
+  let placeholder: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (arg === "--session") {
+      sessionId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--target") {
+      targetId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--element") {
+      elementId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--selector") {
+      selector = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--text" && options?.allowText !== false) {
+      text = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--role") {
+      role = (args[index + 1] as UiSelector["role"]) ?? undefined;
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--name") {
+      name = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--placeholder") {
+      placeholder = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  const uiSelector: UiSelector = {
+    elementId,
+    selector,
+    text,
+    role,
+    name,
+    placeholder,
+  };
+
+  if (!elementId && !selector && !text && !name && !placeholder) {
+    throw new HarnessError(
+      "invalid_input",
+      "A UI selector is required. Pass --element, --selector, --text, --name, or --placeholder.",
+    );
+  }
+
+  return {
+    sessionId,
+    targetId,
+    selector: uiSelector,
+    json,
+  };
+};
+
+const printUiElements = (elements: UiElementSnapshot[]) => {
+  console.table(
+    elements.map((element) => ({
+      id: element.id,
+      role: element.role,
+      text: element.text ?? "",
+      name: element.name ?? "",
+      placeholder: element.placeholder ?? "",
+      value: element.value ?? "",
+      enabled: element.enabled,
+      visible: element.visible,
+    })),
+  );
+};
+
+const printUiSnapshotSummary = (snapshot: UiSnapshot) => {
+  console.log(`Screen:  ${snapshot.screen}`);
+  console.log(`Route:   ${snapshot.route}`);
+  console.log(`URL:     ${snapshot.url}`);
+  console.log(`Title:   ${snapshot.title}`);
+  console.log(`Status:  ${snapshot.status}`);
+  if (snapshot.selectedTab) {
+    console.log(`Tab:     ${snapshot.selectedTab}`);
+  }
+  console.log(`Back:    ${snapshot.canGoBack ? "yes" : "no"}`);
+  if (snapshot.blockingMessage) {
+    console.log(`Blocker: ${snapshot.blockingMessage}`);
+  }
+
+  if (snapshot.primaryActions.length > 0) {
+    console.log("");
+    console.log("Primary actions:");
+    console.table(
+      snapshot.primaryActions.map((action) => ({
+        id: action.id,
+        role: action.role,
+        label: action.label,
+        enabled: action.enabled,
+        selected: action.selected ?? false,
+      })),
+    );
+  }
+
+  if (snapshot.inputs.length > 0) {
+    console.log("");
+    console.log("Inputs:");
+    console.table(
+      snapshot.inputs.map((input) => ({
+        id: input.id,
+        kind: input.kind,
+        name: input.name ?? "",
+        label: input.label ?? "",
+        placeholder: input.placeholder ?? "",
+        valuePreview: input.valuePreview ?? "",
+        empty: input.empty,
+        focused: input.focused,
+      })),
+    );
+  }
+};
+
+const runUiSnapshot = async (args: string[]) => {
+  const options = parseTargetRefOptions(args);
+  const resolved = await snapshotSessionUi(options.sessionId, options.targetId, {
+    detail: options.detail,
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify(resolved, null, 2));
+    return;
+  }
+
+  console.log(`Session: ${resolved.sessionId}`);
+  console.log(`Target:  ${resolved.targetId}`);
+  printUiSnapshotSummary(resolved.snapshot);
+
+  if (resolved.snapshot.elements && resolved.snapshot.elements.length > 0) {
+    console.log("");
+    console.log("Elements:");
+    printUiElements(resolved.snapshot.elements);
+  }
+
+  if (resolved.snapshot.textBlocks && resolved.snapshot.textBlocks.length > 0) {
+    console.log("");
+    console.log("Text blocks:");
+    console.table(
+      resolved.snapshot.textBlocks.map((block) => ({
+        id: block.id,
+        kind: block.kind,
+        text: block.text,
+      })),
+    );
+  }
+};
+
+const runUiInspect = async (args: string[]) => {
+  const options = parseUiSelectorOptions(args);
+  const result = await inspectSessionUi(
+    options.selector,
+    options.sessionId,
+    options.targetId,
+  );
+
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`Session: ${result.sessionId}`);
+  console.log(`Target:  ${result.targetId}`);
+  console.log(`Screen:  ${result.result.screen}`);
+  console.log(`Route:   ${result.result.route}`);
+  console.log(`Title:   ${result.result.title}`);
+  console.log("");
+  console.table([
+    {
+      id: result.result.matchedElement.id,
+      role: result.result.matchedElement.role,
+      text: result.result.matchedElement.text ?? "",
+      label: result.result.matchedElement.label ?? "",
+      name: result.result.matchedElement.name ?? "",
+      placeholder: result.result.matchedElement.placeholder ?? "",
+      value: result.result.matchedElement.value ?? "",
+      enabled: result.result.matchedElement.enabled,
+      visible: result.result.matchedElement.visible,
+    },
+  ]);
+};
+
+const runUiClick = async (args: string[]) => {
+  const options = parseUiSelectorOptions(args);
+  const result = await clickSessionUi(
+    options.selector,
+    options.sessionId,
+    options.targetId,
+  );
+
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(
+    `Clicked ${result.result.matchedElement?.role ?? "element"} on target ${result.targetId}.`,
+  );
+};
+
+const runUiType = async (args: string[]) => {
+  let text = "";
+  let append = false;
+  let submit = false;
+  const selectorArgs: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--text") {
+      text = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--append") {
+      append = true;
+      continue;
+    }
+    if (arg === "--submit") {
+      submit = true;
+      continue;
+    }
+
+    if (!arg) {
+      continue;
+    }
+
+    selectorArgs.push(arg);
+    if (arg.startsWith("--")) {
+      const next = args[index + 1];
+      if (next && !next.startsWith("--")) {
+        selectorArgs.push(next);
+        index += 1;
+      }
+    }
+  }
+
+  if (!text) {
+    throw new HarnessError(
+      "invalid_input",
+      "Missing required option --text <value>.",
+    );
+  }
+
+  const selectorOptions = parseUiSelectorOptions(selectorArgs, {
+    allowText: false,
+  });
+
+  const result = await typeIntoSessionUi(
+    selectorOptions.selector,
+    text,
+    selectorOptions.sessionId,
+    selectorOptions.targetId,
+    { append, submit },
+  );
+
+  if (selectorOptions.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(
+    `Typed into ${result.result.matchedElement?.role ?? "element"} on target ${result.targetId}.`,
+  );
+};
+
+const runUiClear = async (args: string[]) => {
+  const options = parseUiSelectorOptions(args);
+  const result = await clearSessionUi(
+    options.selector,
+    options.sessionId,
+    options.targetId,
+  );
+
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(
+    `Cleared ${result.result.matchedElement?.role ?? "element"} on target ${result.targetId}.`,
+  );
+};
+
+const runUiPress = async (args: string[]) => {
+  let key = "";
+  let code: string | undefined;
+  const selectorArgs: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--key") {
+      key = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--code") {
+      code = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (!arg) {
+      continue;
+    }
+
+    selectorArgs.push(arg);
+    if (arg.startsWith("--")) {
+      const next = args[index + 1];
+      if (next && !next.startsWith("--")) {
+        selectorArgs.push(next);
+        index += 1;
+      }
+    }
+  }
+
+  if (!key) {
+    throw new HarnessError(
+      "invalid_input",
+      "Missing required option --key <key>.",
+    );
+  }
+
+  const selectorOptions = parseUiSelectorOptions(selectorArgs);
+
+  const result = await pressSessionUi(
+    selectorOptions.selector,
+    { key, code },
+    selectorOptions.sessionId,
+    selectorOptions.targetId,
+  );
+
+  if (selectorOptions.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(
+    `Pressed ${key} on ${result.result.matchedElement?.role ?? "element"} in target ${result.targetId}.`,
+  );
+};
+
+const runUiRead = async (args: string[]) => {
+  const options = parseUiSelectorOptions(args);
+  const result = await readSessionUi(
+    options.selector,
+    options.sessionId,
+    options.targetId,
+  );
+
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(JSON.stringify(result.result.matchedElement, null, 2));
+};
+
+const runUiWaitFor = async (args: string[]) => {
+  let sessionId: string | undefined;
+  let targetId: string | undefined;
+  let json = false;
+  let text: string | undefined;
+  let urlIncludes: string | undefined;
+  let state: UiWaitCondition["state"];
+  let timeoutMs: number | undefined;
+  let intervalMs: number | undefined;
+  let selectorArgs: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (arg === "--session") {
+      sessionId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--target") {
+      targetId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--text") {
+      text = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--url") {
+      urlIncludes = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--state") {
+      state = (args[index + 1] as UiWaitCondition["state"]) ?? undefined;
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--timeout") {
+      timeoutMs = Number.parseInt(args[index + 1] ?? "", 10);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--interval") {
+      intervalMs = Number.parseInt(args[index + 1] ?? "", 10);
+      index += 1;
+      continue;
+    }
+
+    if (!arg) {
+      continue;
+    }
+
+    selectorArgs.push(arg);
+    if (arg.startsWith("--")) {
+      const next = args[index + 1];
+      if (next && !next.startsWith("--")) {
+        selectorArgs.push(next);
+        index += 1;
+      }
+    }
+  }
+
+  const condition: UiWaitCondition = {
+    text,
+    urlIncludes,
+    state,
+    timeoutMs,
+    intervalMs,
+  };
+
+  if (selectorArgs.length > 0) {
+    condition.element = parseUiSelectorOptions(selectorArgs).selector;
+  }
+
+  if (!condition.text && !condition.urlIncludes && !condition.element) {
+    throw new HarnessError(
+      "invalid_input",
+      "ui wait-for requires --text, --url, or a UI selector.",
+    );
+  }
+
+  const result = await waitForSessionUi(condition, sessionId, targetId);
+
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(
+    result.result.satisfied
+      ? `Condition satisfied after ${result.result.elapsedMs}ms.`
+      : `Condition timed out after ${result.result.elapsedMs}ms.`,
+  );
+};
+
 const main = async () => {
   const args = process.argv.slice(2);
-  const [command, subcommand] = args;
+  const [command, subcommand, subsubcommand] = args;
 
   if (!command || command === "help" || command === "--help") {
     printHelp();
@@ -705,21 +1164,64 @@ const main = async () => {
     return;
   }
 
+  if (command === "ui" && subcommand === "snapshot") {
+    await runUiSnapshot(args.slice(2));
+    return;
+  }
+
+  if (command === "ui" && subcommand === "inspect") {
+    await runUiInspect(args.slice(2));
+    return;
+  }
+
+  if (command === "ui" && subcommand === "click") {
+    await runUiClick(args.slice(2));
+    return;
+  }
+
+  if (command === "ui" && subcommand === "type") {
+    await runUiType(args.slice(2));
+    return;
+  }
+
+  if (command === "ui" && subcommand === "clear") {
+    await runUiClear(args.slice(2));
+    return;
+  }
+
+  if (command === "ui" && subcommand === "press") {
+    await runUiPress(args.slice(2));
+    return;
+  }
+
+  if (command === "ui" && subcommand === "read") {
+    await runUiRead(args.slice(2));
+    return;
+  }
+
+  if (command === "ui" && subcommand === "wait-for") {
+    await runUiWaitFor(args.slice(2));
+    return;
+  }
+
+  if (command === "ui" && subsubcommand === "--help") {
+    printHelp();
+    return;
+  }
+
   throw new HarnessError(
     "invalid_input",
     `Unknown command "${args.join(" ")}".`,
   );
 };
 
-if (import.meta.main) {
-  try {
-    await main();
-  } catch (error) {
-    if (error instanceof HarnessError) {
-      console.error(error.message);
-      process.exitCode = 1;
-    } else {
-      throw error;
-    }
+try {
+  await main();
+} catch (error) {
+  if (error instanceof HarnessError) {
+    console.error(error.message);
+    process.exitCode = 1;
+  } else {
+    throw error;
   }
 }
