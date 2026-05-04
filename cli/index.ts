@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import { HarnessError } from "../core/errors.ts";
 import {
   captureSessionWebviewScreenshot,
@@ -30,28 +32,28 @@ const printHelp = () => {
   console.log(`Mobile Harness
 
 Usage:
-  bun run mobile-harness devices list [--platform android|ios|all] [--json]
-  bun run mobile-harness session attach --platform android --device <serial> --app <appId> [--launch] [--json]
-  bun run mobile-harness logs tail --session <id> [--filter <text>]
-  bun run mobile-harness screenshot --session <id> [--output <path>] [--json]
-  bun run mobile-harness webviews list --session <id> [--json]
-  bun run mobile-harness webviews screenshot --session <id> --target <id> [--output <path>] [--json]
-  bun run mobile-harness js eval --session <id> --target <id> --expression <code> [--json]
-  bun run mobile-harness console tail --session <id> --target <id> [--json]
-  bun run mobile-harness network tail --session <id> --target <id> [--json]
+  mobile-harness devices list [--platform android|ios|all] [--json]
+  mobile-harness session attach --platform android --device <serial> --app <appId> [--launch] [--json]
+  mobile-harness logs tail --session <id> [--filter <text>]
+  mobile-harness screenshot --session <id> [--output <path>] [--json]
+  mobile-harness webviews list --session <id> [--json]
+  mobile-harness webviews screenshot --session <id> --target <id> [--output <path>] [--json]
+  mobile-harness js eval --session <id> --target <id> --expression <code> [--json]
+  mobile-harness console tail --session <id> --target <id> [--json]
+  mobile-harness network tail --session <id> --target <id> [--json]
 
 Examples:
-  bun run mobile-harness devices list
-  bun run mobile-harness devices list --platform android
-  bun run mobile-harness devices list --json
-  bun run mobile-harness session attach --platform android --device emulator-5554 --app ai.classology.app --launch
-  bun run mobile-harness logs tail --session <session-id>
-  bun run mobile-harness screenshot --session <session-id>
-  bun run mobile-harness webviews list --session <session-id>
-  bun run mobile-harness webviews screenshot --session <session-id> --target <target-id>
-  bun run mobile-harness js eval --session <session-id> --target <target-id> --expression "document.title"
-  bun run mobile-harness console tail --session <session-id> --target <target-id>
-  bun run mobile-harness network tail --session <session-id> --target <target-id>
+  mobile-harness devices list
+  mobile-harness devices list --platform android
+  mobile-harness devices list --json
+  mobile-harness session attach --platform android --device emulator-5554 --app com.example.app --launch
+  mobile-harness logs tail --session <session-id>
+  mobile-harness screenshot --session <session-id>
+  mobile-harness webviews list --session <session-id>
+  mobile-harness webviews screenshot --session <session-id> --target <target-id>
+  mobile-harness js eval --session <session-id> --target <target-id> --expression "document.title"
+  mobile-harness console tail --session <session-id> --target <target-id>
+  mobile-harness network tail --session <session-id> --target <target-id>
 `);
 };
 
@@ -709,13 +711,15 @@ const main = async () => {
   );
 };
 
-try {
-  await main();
-} catch (error) {
-  if (error instanceof HarnessError) {
-    console.error(error.message);
-    process.exitCode = 1;
-  } else {
-    throw error;
+if (import.meta.main) {
+  try {
+    await main();
+  } catch (error) {
+    if (error instanceof HarnessError) {
+      console.error(error.message);
+      process.exitCode = 1;
+    } else {
+      throw error;
+    }
   }
 }

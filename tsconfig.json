@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noEmit": true,
+    "types": ["bun"],
+    "skipLibCheck": true
+  },
+  "include": ["android/**/*.ts", "cli/**/*.ts", "core/**/*.ts", "ios/**/*.ts", "mcp/**/*.ts"]
+}

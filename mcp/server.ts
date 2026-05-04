@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import { z } from "zod";
 import { HarnessError } from "../core/errors.ts";
 import {
@@ -39,7 +41,7 @@ const defineTool = <const Name extends string, Schema extends z.ZodType>(
 
 type AnyToolDefinition = ToolDefinition<string, z.ZodTypeAny>;
 
-const SERVER_NAME = "classology-mobile-harness";
+const SERVER_NAME = "mobile-harness";
 const SERVER_VERSION = "0.1.0";
 const JSON_RPC_VERSION = "2.0";
 const SUPPORTED_PROTOCOL_VERSIONS = [
@@ -428,7 +430,7 @@ const handleInitialize = async (id: JsonRpcId, params: unknown) => {
         version: SERVER_VERSION,
       },
       instructions:
-        "Android-first mobile debugging harness for Classology. Use device/session tools first, then WebView tools once a session is attached.",
+        "Android-first mobile debugging harness. Use device and session tools first, then WebView tools once a session is attached.",
     }),
   );
 };
@@ -574,11 +576,13 @@ const main = async () => {
   }
 };
 
-try {
-  await main();
-} catch (error) {
-  const message =
-    error instanceof Error ? error.message : "Unhandled MCP server error.";
-  console.error(message);
-  process.exitCode = 1;
+if (import.meta.main) {
+  try {
+    await main();
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unhandled MCP server error.";
+    console.error(message);
+    process.exitCode = 1;
+  }
 }

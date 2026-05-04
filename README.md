@@ -1,6 +1,13 @@
 # Mobile Harness
 
-Android-first local developer harness for attaching agents and CLI workflows to mobile devices running the Classology Capacitor app.
+Android-first local developer harness for attaching agents and CLI workflows to hybrid mobile apps running on physical devices.
+
+Current runtime requirement:
+
+- Bun for the CLI and MCP entrypoints
+- `adb` for Android device discovery, logs, screenshots, and DevTools socket forwarding
+
+This package is intentionally Bun-native today. Publishing to npm is still straightforward, but consumers should expect a Bun runtime until the package is explicitly ported to Node.
 
 Current scaffold status:
 
@@ -22,21 +29,42 @@ Current scaffold status:
 Run:
 
 ```bash
-bun run mobile-harness devices list
-bun run mobile-harness session attach --platform android --device <serial> --app ai.classology.app --launch
-bun run mobile-harness logs tail --session <session-id>
-bun run mobile-harness screenshot --session <session-id>
-bun run mobile-harness webviews list --session <session-id>
-bun run mobile-harness webviews screenshot --session <session-id> --target <target-id>
-bun run mobile-harness js eval --session <session-id> --target <target-id> --expression "document.title"
-bun run mobile-harness console tail --session <session-id> --target <target-id>
-bun run mobile-harness network tail --session <session-id> --target <target-id>
+mobile-harness devices list
+mobile-harness session attach --platform android --device <serial> --app com.example.app --launch
+mobile-harness logs tail --session <session-id>
+mobile-harness screenshot --session <session-id>
+mobile-harness webviews list --session <session-id>
+mobile-harness webviews screenshot --session <session-id> --target <target-id>
+mobile-harness js eval --session <session-id> --target <target-id> --expression "document.title"
+mobile-harness console tail --session <session-id> --target <target-id>
+mobile-harness network tail --session <session-id> --target <target-id>
 ```
 
 Run MCP:
 
 ```bash
-bun run mobile-harness:mcp
+mobile-harness-mcp
+```
+
+Local development in another app repo:
+
+```bash
+cd /path/to/mobile-harness
+bun install
+
+cd /path/to/your-app
+bun add -d link:../mobile-harness
+```
+
+Then expose stable app-level scripts that do not care whether the package is linked locally or installed from npm later:
+
+```json
+{
+  "scripts": {
+    "mobile-harness": "mobile-harness",
+    "mobile-harness:mcp": "mobile-harness-mcp"
+  }
+}
 ```
 
 Current MCP tools:

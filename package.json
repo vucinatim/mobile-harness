@@ -1,0 +1,26 @@
+{
+  "name": "@zerodays/mobile-harness",
+  "version": "0.1.0",
+  "description": "Android-first mobile debugging harness with CLI and MCP surfaces for hybrid app WebViews.",
+  "type": "module",
+  "private": false,
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "bin": {
+    "mobile-harness": "./cli/index.ts",
+    "mobile-harness-mcp": "./mcp/server.ts"
+  },
+  "scripts": {
+    "mobile-harness": "bun run ./cli/index.ts",
+    "mobile-harness:mcp": "bun run ./mcp/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "zod": "^4.3.5"
+  }
+}
