@@ -38,7 +38,12 @@ export type WebviewTarget = {
 };
 
 export type Artifact =
-  | { type: "screenshot"; path: string; createdAt: string }
+  | {
+      type: "screenshot";
+      scope: "device" | "webview";
+      path: string;
+      createdAt: string;
+    }
   | { type: "log"; path: string; createdAt: string }
   | { type: "network"; path: string; createdAt: string }
   | { type: "console"; path: string; createdAt: string };

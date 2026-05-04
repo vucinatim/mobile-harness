@@ -25,6 +25,11 @@ export interface HarnessBackend {
     sessionId: string,
     options?: ScreenshotOptions,
   ): Promise<Artifact>;
+  captureWebviewScreenshot(
+    sessionId: string,
+    targetId: string,
+    options?: ScreenshotOptions,
+  ): Promise<Artifact>;
   listWebviews(sessionId: string): Promise<WebviewTarget[]>;
   attachWebview(sessionId: string, targetId: string): Promise<void>;
   evalJs(

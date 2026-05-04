@@ -43,6 +43,14 @@ export class IOSHarnessBackend implements HarnessBackend {
     throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
   }
 
+  async captureWebviewScreenshot(
+    _sessionId: string,
+    _targetId: string,
+    _options?: ScreenshotOptions,
+  ): Promise<Artifact> {
+    throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
+  }
+
   async listWebviews(_sessionId: string): Promise<WebviewTarget[]> {
     throw notImplemented("The iOS backend is scaffolded but not implemented yet.");
   }

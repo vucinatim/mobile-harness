@@ -26,6 +26,7 @@ Usage:
   bun run mobile-harness logs tail --session <id> [--filter <text>]
   bun run mobile-harness screenshot --session <id> [--output <path>] [--json]
   bun run mobile-harness webviews list --session <id> [--json]
+  bun run mobile-harness webviews screenshot --session <id> --target <id> [--output <path>] [--json]
   bun run mobile-harness js eval --session <id> --target <id> --expression <code> [--json]
   bun run mobile-harness console tail --session <id> --target <id> [--json]
   bun run mobile-harness network tail --session <id> --target <id> [--json]
@@ -38,6 +39,7 @@ Examples:
   bun run mobile-harness logs tail --session <session-id>
   bun run mobile-harness screenshot --session <session-id>
   bun run mobile-harness webviews list --session <session-id>
+  bun run mobile-harness webviews screenshot --session <session-id> --target <target-id>
   bun run mobile-harness js eval --session <session-id> --target <target-id> --expression "document.title"
   bun run mobile-harness console tail --session <session-id> --target <target-id>
   bun run mobile-harness network tail --session <session-id> --target <target-id>
@@ -376,6 +378,86 @@ const runWebviewsList = async (args: string[]) => {
   console.table(formatWebviewsTable(targets));
 };
 
+type WebviewScreenshotOptions = {
+  sessionId: string;
+  targetId: string;
+  outputPath?: string;
+  json: boolean;
+};
+
+const parseWebviewScreenshotOptions = (
+  args: string[],
+): WebviewScreenshotOptions => {
+  let sessionId = "";
+  let targetId = "";
+  let outputPath: string | undefined;
+  let json = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (arg === "--session") {
+      sessionId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--target") {
+      targetId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--output") {
+      outputPath = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  if (!sessionId) {
+    throw new HarnessError(
+      "invalid_input",
+      "Missing required option --session <id>.",
+    );
+  }
+
+  if (!targetId) {
+    throw new HarnessError(
+      "invalid_input",
+      "Missing required option --target <id>.",
+    );
+  }
+
+  return { sessionId, targetId, outputPath, json };
+};
+
+const runWebviewScreenshot = async (args: string[]) => {
+  const options = parseWebviewScreenshotOptions(args);
+  const backend = await getBackendForSession(options.sessionId);
+  const artifact = await backend.captureWebviewScreenshot(
+    options.sessionId,
+    options.targetId,
+    { outputPath: options.outputPath },
+  );
+
+  if (options.json) {
+    console.log(JSON.stringify(artifact, null, 2));
+    return;
+  }
+
+  console.log(`Saved WebView screenshot to ${artifact.path}`);
+};
+
 type JsEvalOptions = {
   sessionId: string;
   targetId: string;
@@ -591,6 +673,11 @@ const main = async () => {
 
   if (command === "webviews" && subcommand === "list") {
     await runWebviewsList(args.slice(2));
+    return;
+  }
+
+  if (command === "webviews" && subcommand === "screenshot") {
+    await runWebviewScreenshot(args.slice(2));
     return;
   }
 

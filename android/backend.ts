@@ -30,6 +30,7 @@ import {
   spawnAndroidLogcat,
 } from "./adb.ts";
 import {
+  captureAndroidWebviewScreenshot,
   evaluateAndroidWebview,
   listAndroidWebviews,
   streamAndroidConsole,
@@ -130,6 +131,36 @@ export class AndroidHarnessBackend implements HarnessBackend {
 
     return {
       type: "screenshot",
+      scope: "device",
+      path: outputPath,
+      createdAt,
+    };
+  }
+
+  async captureWebviewScreenshot(
+    sessionId: string,
+    targetId: string,
+    options?: ScreenshotOptions,
+  ): Promise<Artifact> {
+    const session = await loadSession(sessionId);
+    const createdAt = new Date().toISOString();
+    const outputPath =
+      options?.outputPath ??
+      (await getArtifactPath(
+        sessionId,
+        `webview-screenshot-${createdAt.replaceAll(":", "-")}.png`,
+      ));
+
+    await captureAndroidWebviewScreenshot(
+      session.deviceId,
+      session.appId,
+      targetId,
+      outputPath,
+    );
+
+    return {
+      type: "screenshot",
+      scope: "webview",
       path: outputPath,
       createdAt,
     };

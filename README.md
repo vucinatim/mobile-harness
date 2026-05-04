@@ -10,6 +10,7 @@ Current scaffold status:
 - Android device screenshot capture
 - Android WebView target discovery via forwarded devtools socket
 - Android JavaScript evaluation over CDP WebSocket
+- Android WebView screenshot capture over CDP
 - Android WebView console streaming over CDP
 - Android WebView network streaming over CDP
 - shared core types and backend contract
@@ -25,6 +26,7 @@ bun run mobile-harness session attach --platform android --device <serial> --app
 bun run mobile-harness logs tail --session <session-id>
 bun run mobile-harness screenshot --session <session-id>
 bun run mobile-harness webviews list --session <session-id>
+bun run mobile-harness webviews screenshot --session <session-id> --target <target-id>
 bun run mobile-harness js eval --session <session-id> --target <target-id> --expression "document.title"
 bun run mobile-harness console tail --session <session-id> --target <target-id>
 bun run mobile-harness network tail --session <session-id> --target <target-id>

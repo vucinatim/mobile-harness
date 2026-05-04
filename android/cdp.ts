@@ -235,6 +235,76 @@ const evaluateOverWebSocket = (
     };
   });
 
+const captureScreenshotOverWebSocket = (
+  webSocketDebuggerUrl: string,
+): Promise<ArrayBuffer> =>
+  new Promise((resolve, reject) => {
+    const requestId = 1;
+    const socket = new WebSocket(webSocketDebuggerUrl);
+
+    socket.onopen = () => {
+      socket.send(
+        JSON.stringify({
+          id: requestId,
+          method: "Page.captureScreenshot",
+          params: {
+            format: "png",
+            fromSurface: true,
+          },
+        }),
+      );
+    };
+
+    socket.onerror = () => {
+      reject(
+        new HarnessError(
+          "command_failed",
+          "Could not connect to the WebView debugger WebSocket.",
+        ),
+      );
+    };
+
+    socket.onmessage = (event) => {
+      const payload = JSON.parse(
+        typeof event.data === "string" ? event.data : event.data.toString(),
+      ) as {
+        id?: number;
+        result?: { data?: string };
+        error?: { message?: string };
+      };
+
+      if (payload.id !== requestId) {
+        return;
+      }
+
+      socket.close();
+
+      if (payload.error?.message) {
+        reject(new HarnessError("command_failed", payload.error.message));
+        return;
+      }
+
+      const data = payload.result?.data;
+      if (!data) {
+        reject(
+          new HarnessError(
+            "command_failed",
+            "CDP screenshot completed without image data.",
+          ),
+        );
+        return;
+      }
+
+      const bytes = Buffer.from(data, "base64");
+      resolve(
+        bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ),
+      );
+    };
+  });
+
 const createAsyncQueue = <T>(): AsyncQueueController<T> => {
   const values: T[] = [];
   const waiters: Array<() => void> = [];
@@ -457,6 +527,26 @@ export const evaluateAndroidWebview = async (
     return await evaluateOverWebSocket(target.webSocketDebuggerUrl, expression);
   } finally {
     forwarded.cleanup();
+  }
+};
+
+export const captureAndroidWebviewScreenshot = async (
+  deviceId: string,
+  appId: string,
+  targetId: string,
+  outputPath: string,
+) => {
+  const { webSocketDebuggerUrl, cleanup } = await getTargetDebuggerUrl(
+    deviceId,
+    appId,
+    targetId,
+  );
+
+  try {
+    const screenshot = await captureScreenshotOverWebSocket(webSocketDebuggerUrl);
+    await Bun.write(outputPath, screenshot);
+  } finally {
+    cleanup();
   }
 };
 
