@@ -23,6 +23,7 @@ import type {
 import type {
   UiActionResult,
   UiInspectResult,
+  UiTapOptions,
   UiPressOptions,
   UiReadResult,
   UiSelector,
@@ -53,6 +54,7 @@ import {
   clearAndroidUi,
   clickAndroidUi,
   inspectAndroidUi,
+  tapAndroidUi,
   pressAndroidUi,
   readAndroidUi,
   snapshotAndroidUi,
@@ -97,6 +99,8 @@ export class AndroidHarnessBackend implements HarnessBackend {
   async listDevices(): Promise<DeviceSummary[]> {
     return await listAndroidDevices();
   }
+
+  async cleanupSession(_sessionId: string): Promise<void> {}
 
   async createSession(input: CreateSessionInput): Promise<AppSession> {
     const device = await getAndroidDevice(input.deviceId);
@@ -304,6 +308,20 @@ export class AndroidHarnessBackend implements HarnessBackend {
       session.appId,
       targetId,
       selector,
+    );
+  }
+
+  async tapUi(
+    sessionId: string,
+    targetId: string,
+    options: UiTapOptions,
+  ): Promise<UiActionResult> {
+    const session = await loadSession(sessionId);
+    return await tapAndroidUi(
+      session.deviceId,
+      session.appId,
+      targetId,
+      options,
     );
   }
 

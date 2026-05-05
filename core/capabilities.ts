@@ -45,3 +45,33 @@ export const androidDeviceCapabilities = (): DeviceCapabilities => ({
   canReadNetwork: true,
   canLaunchApp: true,
 });
+
+export const iosPhaseOneCapabilities = (): DeviceCapabilities => ({
+  ...unsupportedCapabilities(),
+  canListDevices: true,
+  canLaunchApp: true,
+});
+
+export const iosPhaseTwoCapabilities = (): DeviceCapabilities => ({
+  ...iosPhaseOneCapabilities(),
+  canCaptureScreenshot: true,
+});
+
+export const iosPhaseThreeCapabilities = (): DeviceCapabilities => ({
+  ...iosPhaseTwoCapabilities(),
+  canReadLogs: true,
+});
+
+export const iosCapacitorBridgeCapabilities = (): DeviceCapabilities => ({
+  ...iosPhaseThreeCapabilities(),
+  canListWebviews: true,
+  canAttachWebview: true,
+  canEvalJs: true,
+  canReadConsole: true,
+  canReadNetwork: true,
+  canAutomateNativeUi: true,
+});
+
+export const iosPhaseFourCapabilities = (): DeviceCapabilities => ({
+  ...iosCapacitorBridgeCapabilities(),
+});

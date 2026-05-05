@@ -27,6 +27,10 @@ export type AppSession = {
   platform: Platform;
   appId: string;
   startedAt: string;
+  projectRoot?: string;
+  integrations?: {
+    capacitorIOSBridge?: boolean;
+  };
 };
 
 export type WebviewTarget = {

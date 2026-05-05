@@ -96,10 +96,16 @@ const getBackendForSession = async (sessionId: string) => {
   return createBackends()[session.platform];
 };
 
+const isIOSCapacitorBridgeSession = async (sessionId: string) => {
+  const session = await loadSession(sessionId);
+  return session.platform === "ios" && session.integrations?.capacitorIOSBridge === true;
+};
+
 const applyTargetAndWorkerState = async (
   state: RecordingState,
   targetId?: string,
 ) => {
+  const usesIOSBridgeCollector = await isIOSCapacitorBridgeSession(state.sessionId);
   const nextState: RecordingState = {
     ...state,
     targetId: targetId ?? state.targetId,
@@ -114,7 +120,7 @@ const applyTargetAndWorkerState = async (
     );
   }
 
-  if (nextState.targetId) {
+  if (nextState.targetId && !usesIOSBridgeCollector) {
     if (
       nextState.config.console &&
       !isPidRunning(nextState.workers.console)
@@ -298,6 +304,10 @@ const activateTimeline = async (
     insertSystemMarker?: boolean;
   },
 ) => {
+  const mergedConfig = {
+    ...defaultRecorderConfig(),
+    ...config,
+  };
   let resolvedTargetId: string | undefined;
   try {
     resolvedTargetId = (await resolveRecordingTarget(sessionId, targetId)).id;
@@ -306,15 +316,11 @@ const activateTimeline = async (
       throw error;
     }
 
-    const nativeLogsEnabled = config?.nativeLogs ?? defaultRecorderConfig().nativeLogs;
-    if (!nativeLogsEnabled) {
+    const requiresWebviewTarget = mergedConfig.console || mergedConfig.network;
+    if (requiresWebviewTarget && !mergedConfig.nativeLogs) {
       throw error;
     }
   }
-  const mergedConfig = {
-    ...defaultRecorderConfig(),
-    ...config,
-  };
 
   if (options?.resetEvents) {
     await clearRecordingEvents(sessionId);
@@ -329,11 +335,13 @@ const activateTimeline = async (
     workers: {},
   };
 
-  if (mergedConfig.console && resolvedTargetId) {
+  const usesIOSBridgeCollector = await isIOSCapacitorBridgeSession(sessionId);
+
+  if (mergedConfig.console && resolvedTargetId && !usesIOSBridgeCollector) {
     state.workers.console = spawnWorker("console", sessionId, resolvedTargetId);
   }
 
-  if (mergedConfig.network && resolvedTargetId) {
+  if (mergedConfig.network && resolvedTargetId && !usesIOSBridgeCollector) {
     state.workers.network = spawnWorker("network", sessionId, resolvedTargetId);
   }
 
@@ -540,6 +548,83 @@ const isNetworkFailure = (event: NetworkEvent) =>
 
 const toConsoleText = (event: ConsoleEvent) => event.args.join(" ").trim();
 
+const MOBILE_HARNESS_DEBUG_PREFIX = "MHDBG ";
+
+type NativeBridgePayload =
+  | {
+      kind: "console";
+      level?: ConsoleEvent["type"];
+      args?: unknown[];
+      timestamp?: string;
+    }
+  | {
+      kind: "network";
+      id?: string;
+      stage?: NetworkEvent["stage"];
+      method?: string;
+      url?: string;
+      status?: number;
+      errorText?: string;
+      timestamp?: string;
+    };
+
+const parseNativeBridgePayload = (
+  event: LogEvent,
+): ConsoleEvent | NetworkEvent | null => {
+  if (!event.message.startsWith(MOBILE_HARNESS_DEBUG_PREFIX)) {
+    return null;
+  }
+
+  const payloadText = event.message.slice(MOBILE_HARNESS_DEBUG_PREFIX.length).trim();
+  if (!payloadText) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(payloadText) as NativeBridgePayload;
+
+    if (payload.kind === "console") {
+      const level = payload.level;
+      return {
+        type:
+          level === "error" ||
+          level === "warn" ||
+          level === "debug" ||
+          level === "info"
+            ? level
+            : "log",
+        args: Array.isArray(payload.args)
+          ? payload.args.map((entry) =>
+              typeof entry === "string" ? entry : JSON.stringify(entry),
+            )
+          : [],
+        timestamp: payload.timestamp,
+      };
+    }
+
+    if (
+      payload.kind === "network" &&
+      payload.id &&
+      payload.stage &&
+      payload.method &&
+      payload.url
+    ) {
+      return {
+        id: payload.id,
+        stage: payload.stage,
+        method: payload.method,
+        url: payload.url,
+        status: payload.status,
+        errorText: payload.errorText,
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
 const summarizeNativeLog = (event: LogEvent) => {
   const prefix = event.tag ? `[${event.tag}] ` : "";
   const maxLength = 220;
@@ -639,6 +724,18 @@ export const appendTimelineNativeLogEvent = async (
   sessionId: string,
   event: LogEvent,
 ) => {
+  const bridgedEvent = parseNativeBridgePayload(event);
+  if (bridgedEvent) {
+    if ("type" in bridgedEvent) {
+      await appendTimelineConsoleEvent(sessionId, bridgedEvent);
+      return;
+    }
+
+    await appendTimelineNetworkEvent(sessionId, bridgedEvent);
+    return;
+  }
+
+  const session = await loadSession(sessionId);
   const level = event.level?.toLowerCase();
   const severity: RecordingSeverity =
     level === "error"
@@ -653,7 +750,7 @@ export const appendTimelineNativeLogEvent = async (
     ...createBaseEvent(
       sessionId,
       "nativeLog",
-      "android",
+      session.platform === "ios" ? "system" : "android",
       severity,
       `[native${level ? `:${level}` : ""}] ${summarizeNativeLog(event)}`,
       event.message,
@@ -670,7 +767,7 @@ export const appendTimelineNativeLogEvent = async (
       `[native] ${summarizeNativeLog(event)}`,
       event.message,
       "nativeLog",
-      "android",
+      session.platform === "ios" ? "system" : "android",
       event,
     );
   }

@@ -1,0 +1,665 @@
+// MOBILE_HARNESS_MANAGED_CAPACITOR_IOS_BRIDGE v7
+import Capacitor
+import Foundation
+import WebKit
+
+#if DEBUG
+private let mobileHarnessBridgeHandlerName = "mobileHarnessBridge"
+
+private func mobileHarnessQuotedJSString(_ value: String) -> String {
+    guard
+        let data = try? JSONSerialization.data(withJSONObject: [value], options: []),
+        let json = String(data: data, encoding: .utf8),
+        json.count >= 2
+    else {
+        return "\"\""
+    }
+
+    return String(json.dropFirst().dropLast())
+}
+
+private func mobileHarnessDebugScript(appId: String) -> String {
+    let appIdLiteral = mobileHarnessQuotedJSString(appId)
+
+    return #"""
+(() => {
+  if (window.__mobileHarnessDebugInstalled) {
+    return;
+  }
+  window.__mobileHarnessDebugInstalled = true;
+
+  const appId = __APP_ID__;
+  const originalFetch = globalThis.fetch?.bind(globalThis);
+  const bridge = globalThis.webkit?.messageHandlers?.__HANDLER_NAME__;
+
+  const post = (payload) => {
+    try {
+      bridge?.postMessage({
+        appId,
+        event: payload,
+      });
+    } catch {}
+  };
+
+  const normalize = (value, seen = new WeakSet()) => {
+    if (value == null) return value;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "bigint") return value.toString();
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+      };
+    }
+    if (value instanceof URL) return value.toString();
+    if (typeof value === "function") {
+      return `[Function ${value.name || "anonymous"}]`;
+    }
+    if (typeof value === "object") {
+      if (seen.has(value)) return "[Circular]";
+      seen.add(value);
+
+      if (Array.isArray(value)) {
+        return value.map((entry) => normalize(entry, seen));
+      }
+
+      const output = {};
+      for (const [key, entry] of Object.entries(value)) {
+        output[key] = normalize(entry, seen);
+      }
+      return output;
+    }
+
+    return String(value);
+  };
+
+  const emitConsole = (level, args) => {
+    post({
+      kind: "console",
+      level,
+      args: args.map((arg) => normalize(arg)),
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  window.__mobileHarnessDebugPost = post;
+  window.__mobileHarnessDebugEmitConsole = emitConsole;
+
+  for (const level of ["log", "info", "warn", "error", "debug"]) {
+    const original = console[level]?.bind(console);
+    if (!original) continue;
+
+    console[level] = (...args) => {
+      emitConsole(level, args);
+      return original(...args);
+    };
+  }
+
+  let nextRequestId = 1;
+  const allocRequestId = () => `mh-${nextRequestId++}`;
+
+  const toUrl = (value) => {
+    try {
+      return new URL(value, location.href).toString();
+    } catch {
+      return String(value);
+    }
+  };
+
+  const emitNetwork = (payload) => {
+    post({
+      kind: "network",
+      timestamp: new Date().toISOString(),
+      ...payload,
+    });
+  };
+
+  if (originalFetch) {
+    globalThis.fetch = async (input, init) => {
+      const requestId = allocRequestId();
+      const method =
+        init?.method ||
+        (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET");
+      const url =
+        typeof Request !== "undefined" && input instanceof Request
+          ? input.url
+          : toUrl(typeof input === "string" ? input : String(input));
+
+      emitNetwork({
+        id: requestId,
+        stage: "request",
+        method,
+        url,
+      });
+
+      try {
+        const response = await originalFetch(input, init);
+        emitNetwork({
+          id: requestId,
+          stage: "response",
+          method,
+          url: response.url || url,
+          status: response.status,
+        });
+        return response;
+      } catch (error) {
+        emitNetwork({
+          id: requestId,
+          stage: "failed",
+          method,
+          url,
+          errorText: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    };
+  }
+
+  const originalOpen = XMLHttpRequest.prototype.open;
+  const originalSend = XMLHttpRequest.prototype.send;
+
+  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+    const resolvedUrl = toUrl(url);
+    this.__mobileHarnessDebug = {
+      id: allocRequestId(),
+      method: method || "GET",
+      url: resolvedUrl,
+      finished: false,
+    };
+    return originalOpen.call(this, method, url, ...rest);
+  };
+
+  XMLHttpRequest.prototype.send = function(...args) {
+    const meta = this.__mobileHarnessDebug || {
+      id: allocRequestId(),
+      method: "GET",
+      url: location.href,
+      finished: false,
+    };
+    this.__mobileHarnessDebug = meta;
+
+    emitNetwork({
+      id: meta.id,
+      stage: "request",
+      method: meta.method,
+      url: meta.url,
+    });
+
+    this.addEventListener("loadend", () => {
+      if (meta.finished) return;
+      meta.finished = true;
+      emitNetwork({
+        id: meta.id,
+        stage: "response",
+        method: meta.method,
+        url: meta.url,
+        status: this.status,
+      });
+    }, { once: true });
+
+    this.addEventListener("error", () => {
+      if (meta.finished) return;
+      meta.finished = true;
+      emitNetwork({
+        id: meta.id,
+        stage: "failed",
+        method: meta.method,
+        url: meta.url,
+        errorText: "XMLHttpRequest error",
+      });
+    }, { once: true });
+
+    return originalSend.apply(this, args);
+  };
+
+  emitConsole("debug", ["mobile-harness bridge ready"]);
+})();
+"""#
+    .replacingOccurrences(of: "__APP_ID__", with: appIdLiteral)
+    .replacingOccurrences(of: "__HANDLER_NAME__", with: mobileHarnessBridgeHandlerName)
+}
+#endif
+
+@objc(MobileHarnessBridgeViewController)
+class MobileHarnessBridgeViewController: CAPBridgeViewController, WKScriptMessageHandler {
+    private var mobileHarnessCollectorHost = "127.0.0.1"
+    private var mobileHarnessCommandPollingActive = false
+    private var pendingBridgeExpressionCompletions: [String: ([String: Any]) -> Void] = [:]
+
+    private lazy var collectorSession: URLSession = {
+        URLSession(configuration: .ephemeral)
+    }()
+
+    private func collectorURL(from host: String?) -> URL? {
+        guard let host, !host.isEmpty else {
+            return nil
+        }
+
+        return URL(string: "http://\(host):49152/__mobile_harness/collect")
+    }
+
+    private func activeCollectorURL() -> URL? {
+        if let host = bridge?.config.serverURL.host, let url = collectorURL(from: host) {
+            return url
+        }
+
+        return collectorURL(from: mobileHarnessCollectorHost)
+    }
+
+    private func controlNextURL(from host: String?) -> URL? {
+        guard let host, !host.isEmpty else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = host
+        components.port = 49152
+        components.path = "/__mobile_harness/control/next"
+        components.queryItems = [
+            URLQueryItem(name: "appId", value: Bundle.main.bundleIdentifier ?? ""),
+            URLQueryItem(name: "timeoutMs", value: "25000"),
+        ]
+        return components.url
+    }
+
+    private func activeControlNextURL() -> URL? {
+        if let host = bridge?.config.serverURL.host, let url = controlNextURL(from: host) {
+            return url
+        }
+
+        return controlNextURL(from: mobileHarnessCollectorHost)
+    }
+
+    private func controlResultURL(from host: String?) -> URL? {
+        guard let host, !host.isEmpty else {
+            return nil
+        }
+
+        return URL(string: "http://\(host):49152/__mobile_harness/control/result")
+    }
+
+    private func activeControlResultURL() -> URL? {
+        if let host = bridge?.config.serverURL.host, let url = controlResultURL(from: host) {
+            return url
+        }
+
+        return controlResultURL(from: mobileHarnessCollectorHost)
+    }
+
+    private func sendCollectorEnvelope(_ envelope: [String: Any]) {
+        guard let collectorURL = activeCollectorURL() else {
+            NSLog("mobile-harness iOS bridge missing collector URL")
+            return
+        }
+
+        guard JSONSerialization.isValidJSONObject(envelope) else {
+            NSLog("mobile-harness iOS bridge invalid envelope")
+            return
+        }
+
+        do {
+            let body = try JSONSerialization.data(withJSONObject: envelope, options: [])
+            var request = URLRequest(url: collectorURL)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            collectorSession.dataTask(with: request).resume()
+        } catch {
+            NSLog("mobile-harness iOS bridge collector serialization failed: %@", error.localizedDescription)
+        }
+    }
+
+    private func sendCollectorEvent(_ event: [String: Any]) {
+        let appId = Bundle.main.bundleIdentifier ?? ""
+        sendCollectorEnvelope([
+            "appId": appId,
+            "event": event,
+        ])
+    }
+
+    private func normalizeBridgeValue(_ value: Any?) -> Any {
+        guard let value else {
+            return NSNull()
+        }
+
+        switch value {
+        case let string as String:
+            return string
+        case let number as NSNumber:
+            return number
+        case _ as NSNull:
+            return NSNull()
+        case let array as [Any]:
+            return array.map { normalizeBridgeValue($0) }
+        case let dictionary as [String: Any]:
+            return dictionary.mapValues { normalizeBridgeValue($0) }
+        case let dictionary as NSDictionary:
+            var output: [String: Any] = [:]
+            for (key, entry) in dictionary {
+                if let key = key as? String {
+                    output[key] = normalizeBridgeValue(entry)
+                }
+            }
+            return output
+        default:
+            return String(describing: value)
+        }
+    }
+
+    private func executeBridgeExpression(_ expression: String, completion: @escaping ([String: Any]) -> Void) {
+        guard let webView = self.webView else {
+            completion([
+                "ok": false,
+                "error": [
+                    "name": "BridgeUnavailable",
+                    "message": "WKWebView is not available.",
+                ],
+            ])
+            return
+        }
+
+        let requestId = UUID().uuidString
+        pendingBridgeExpressionCompletions[requestId] = completion
+
+        let requestIdLiteral = mobileHarnessQuotedJSString(requestId)
+        let expressionLiteral = mobileHarnessQuotedJSString(expression)
+        let script = #"""
+(() => {
+  const requestId = __REQUEST_ID__;
+  const expression = __EXPRESSION__;
+  const bridge = globalThis.webkit?.messageHandlers?.__HANDLER_NAME__;
+
+  const normalize = (value, seen = new WeakSet()) => {
+    if (value == null) return value;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "bigint") return value.toString();
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+      };
+    }
+    if (value instanceof URL) return value.toString();
+    if (typeof value === "function") return `[Function ${value.name || "anonymous"}]`;
+    if (typeof value === "object") {
+      if (seen.has(value)) return "[Circular]";
+      seen.add(value);
+      if (Array.isArray(value)) {
+        return value.map((entry) => normalize(entry, seen));
+      }
+      const output = {};
+      for (const [key, entry] of Object.entries(value)) {
+        output[key] = normalize(entry, seen);
+      }
+      return output;
+    }
+    return String(value);
+  };
+
+  Promise.resolve()
+    .then(() => (0, eval)(expression))
+    .then((value) => {
+      bridge?.postMessage({
+        __mobileHarnessControlResult: {
+          requestId,
+          ok: true,
+          value: normalize(value),
+        },
+      });
+    })
+    .catch((error) => {
+      bridge?.postMessage({
+        __mobileHarnessControlResult: {
+          requestId,
+          ok: false,
+          error: normalize(error),
+        },
+      });
+    });
+})();
+true;
+"""#
+            .replacingOccurrences(of: "__REQUEST_ID__", with: requestIdLiteral)
+            .replacingOccurrences(of: "__EXPRESSION__", with: expressionLiteral)
+            .replacingOccurrences(of: "__HANDLER_NAME__", with: mobileHarnessBridgeHandlerName)
+
+        webView.evaluateJavaScript(script) { _, error in
+            if let error {
+                self.pendingBridgeExpressionCompletions.removeValue(forKey: requestId)
+                completion([
+                    "ok": false,
+                    "error": [
+                        "name": String(describing: type(of: error)),
+                        "message": error.localizedDescription,
+                    ],
+                ])
+                return
+            }
+        }
+    }
+
+    private func postControlResult(_ payload: [String: Any], completion: (() -> Void)? = nil) {
+        guard let resultURL = activeControlResultURL() else {
+            completion?()
+            return
+        }
+
+        guard JSONSerialization.isValidJSONObject(payload) else {
+            completion?()
+            return
+        }
+
+        do {
+            let body = try JSONSerialization.data(withJSONObject: payload, options: [])
+            var request = URLRequest(url: resultURL)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            collectorSession.dataTask(with: request) { _, _, _ in
+                completion?()
+            }.resume()
+        } catch {
+            completion?()
+        }
+    }
+
+    private func executeControlCommand(_ payload: [String: Any]) {
+        guard let commandId = payload["id"] as? String else {
+            pollForBridgeCommand(after: 0.25)
+            return
+        }
+
+        guard let kind = payload["kind"] as? String, kind == "eval" else {
+            postControlResult([
+                "appId": Bundle.main.bundleIdentifier ?? "",
+                "commandId": commandId,
+                "ok": false,
+                "error": [
+                    "name": "UnsupportedCommand",
+                    "message": "Unsupported bridge command kind.",
+                ],
+            ]) {
+                self.pollForBridgeCommand(after: 0.0)
+            }
+            return
+        }
+
+        guard let expression = payload["expression"] as? String else {
+            postControlResult([
+                "appId": Bundle.main.bundleIdentifier ?? "",
+                "commandId": commandId,
+                "ok": false,
+                "error": [
+                    "name": "InvalidCommand",
+                    "message": "Missing bridge expression.",
+                ],
+            ]) {
+                self.pollForBridgeCommand(after: 0.0)
+            }
+            return
+        }
+
+        executeBridgeExpression(expression) { result in
+            var payload: [String: Any] = [
+                "appId": Bundle.main.bundleIdentifier ?? "",
+                "commandId": commandId,
+            ]
+
+            for (key, value) in result {
+                payload[key] = value
+            }
+
+            self.postControlResult(payload) {
+                self.pollForBridgeCommand(after: 0.0)
+            }
+        }
+    }
+
+    private func pollForBridgeCommand(after delay: TimeInterval) {
+        guard mobileHarnessCommandPollingActive else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.mobileHarnessCommandPollingActive else {
+                return
+            }
+
+            guard let nextURL = self.activeControlNextURL() else {
+                self.pollForBridgeCommand(after: 1.0)
+                return
+            }
+
+            self.collectorSession.dataTask(with: nextURL) { data, response, error in
+                if error != nil {
+                    self.pollForBridgeCommand(after: 1.0)
+                    return
+                }
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    self.pollForBridgeCommand(after: 1.0)
+                    return
+                }
+
+                if httpResponse.statusCode == 204 {
+                    self.pollForBridgeCommand(after: 0.0)
+                    return
+                }
+
+                guard httpResponse.statusCode == 200, let data else {
+                    self.pollForBridgeCommand(after: 1.0)
+                    return
+                }
+
+                do {
+                    guard
+                        let payload = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+                    else {
+                        self.pollForBridgeCommand(after: 0.25)
+                        return
+                    }
+
+                    DispatchQueue.main.async {
+                        self.executeControlCommand(payload)
+                    }
+                } catch {
+                    self.pollForBridgeCommand(after: 0.25)
+                }
+            }.resume()
+        }
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        #if DEBUG
+        NSLog("mobile-harness iOS bridge viewDidLoad using %@", NSStringFromClass(type(of: self)))
+        #endif
+    }
+
+    override func webViewConfiguration(for instanceConfiguration: InstanceConfiguration) -> WKWebViewConfiguration {
+        let configuration = super.webViewConfiguration(for: instanceConfiguration)
+
+        #if DEBUG
+        mobileHarnessCollectorHost = instanceConfiguration.serverURL.host ?? "127.0.0.1"
+        let appId = Bundle.main.bundleIdentifier ?? ""
+        configuration.userContentController.add(self, name: mobileHarnessBridgeHandlerName)
+        let script = WKUserScript(
+            source: mobileHarnessDebugScript(appId: appId),
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        configuration.userContentController.addUserScript(script)
+        #endif
+
+        return configuration
+    }
+
+    override func capacitorDidLoad() {
+        super.capacitorDidLoad()
+
+        #if DEBUG
+        if let userContentController = webView?.configuration.userContentController {
+            let appId = Bundle.main.bundleIdentifier ?? ""
+            let script = WKUserScript(
+                source: mobileHarnessDebugScript(appId: appId),
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+            userContentController.add(self, name: mobileHarnessBridgeHandlerName)
+            userContentController.addUserScript(script)
+            NSLog("mobile-harness iOS bridge registered userContentController hooks")
+        } else {
+            NSLog("mobile-harness iOS bridge missing userContentController")
+        }
+
+        NSLog("mobile-harness iOS bridge controller active")
+        sendCollectorEvent([
+            "kind": "console",
+            "level": "debug",
+            "args": ["mobile-harness native bridge controller active"],
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+        ])
+        mobileHarnessCommandPollingActive = true
+        pollForBridgeCommand(after: 0.0)
+        #endif
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == mobileHarnessBridgeHandlerName else {
+            return
+        }
+
+        guard let payload = message.body as? [String: Any] else {
+            NSLog("mobile-harness iOS bridge received invalid message body")
+            return
+        }
+
+        if let controlResult = payload["__mobileHarnessControlResult"] as? [String: Any],
+           let requestId = controlResult["requestId"] as? String,
+           let completion = pendingBridgeExpressionCompletions.removeValue(forKey: requestId) {
+            var result: [String: Any] = [
+                "ok": (controlResult["ok"] as? Bool) ?? false,
+            ]
+
+            if let value = controlResult["value"] {
+                result["value"] = normalizeBridgeValue(value)
+            }
+
+            if let error = controlResult["error"] {
+                result["error"] = normalizeBridgeValue(error)
+            }
+
+            completion(result)
+            return
+        }
+
+        sendCollectorEnvelope(payload)
+    }
+}

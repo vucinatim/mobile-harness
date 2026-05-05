@@ -15,6 +15,7 @@ import type { DeviceCapabilities } from "./capabilities.ts";
 import type {
   UiActionResult,
   UiInspectResult,
+  UiTapOptions,
   UiPressOptions,
   UiReadResult,
   UiSelector,
@@ -28,6 +29,7 @@ import type {
 export interface HarnessBackend {
   listDevices(): Promise<DeviceSummary[]>;
   createSession(input: CreateSessionInput): Promise<AppSession>;
+  cleanupSession(sessionId: string): Promise<void>;
   getCapabilities(sessionId: string): Promise<DeviceCapabilities>;
   tailLogs(
     sessionId: string,
@@ -71,6 +73,11 @@ export interface HarnessBackend {
     sessionId: string,
     targetId: string,
     selector: UiSelector,
+  ): Promise<UiActionResult>;
+  tapUi(
+    sessionId: string,
+    targetId: string,
+    options: UiTapOptions,
   ): Promise<UiActionResult>;
   typeIntoUi(
     sessionId: string,

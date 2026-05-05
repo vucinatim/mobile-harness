@@ -10,10 +10,11 @@ import type {
 } from "./types.ts";
 import type { DeviceCapabilities } from "./capabilities.ts";
 import { HarnessError } from "./errors.ts";
-import { loadSession } from "./storage.ts";
-import { ensureTimeline } from "./timeline.ts";
+import { listSessions, loadSession } from "./storage.ts";
+import { deactivateTimeline, ensureTimeline } from "./timeline.ts";
 import { AndroidHarnessBackend } from "../android/backend.ts";
 import { IOSHarnessBackend } from "../ios/backend.ts";
+import { ensureIOSBridgeCollector } from "../ios/bridge-collector.ts";
 
 export const supportedPlatforms = ["android", "ios"] as const;
 
@@ -60,8 +61,39 @@ export const createSession = async (
   platform: Platform,
   input: CreateSessionInput,
 ): Promise<AppSession> => {
-  const session = await createBackends()[platform].createSession(input);
-  await ensureTimeline(session.id);
+  const backend = createBackends()[platform];
+  const existingSessions = await listSessions();
+  const session = await backend.createSession(input);
+
+  const staleSessions = existingSessions.filter(
+    (existingSession) =>
+      existingSession.platform === platform &&
+      existingSession.deviceId === input.deviceId &&
+      existingSession.appId === input.appId,
+  );
+
+  for (const staleSession of staleSessions) {
+    try {
+      await deactivateTimeline(staleSession.id);
+    } catch {
+      // Ignore sessions without active timelines.
+    }
+
+    await backend.cleanupSession(staleSession.id);
+  }
+
+  const capabilities = await backend.getCapabilities(session.id);
+
+  await ensureTimeline(session.id, undefined, {
+    console: capabilities.canReadConsole,
+    network: capabilities.canReadNetwork,
+    nativeLogs: capabilities.canReadLogs,
+  });
+
+  if (session.platform === "ios" && session.integrations?.capacitorIOSBridge) {
+    await ensureIOSBridgeCollector();
+  }
+
   return session;
 };
 

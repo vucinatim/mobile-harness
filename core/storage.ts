@@ -25,6 +25,8 @@ export const ensureHarnessStorage = async () => {
   await ensureDir(timelineDir);
 };
 
+export const getHarnessRootPath = () => harnessRoot;
+
 export const saveSession = async (session: SessionRecord) => {
   await ensureHarnessStorage();
   await Bun.write(sessionFilePath(session.id), JSON.stringify(session, null, 2));

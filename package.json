@@ -43,8 +43,8 @@
     "webview"
   ],
   "scripts": {
-    "mobile-harness": "bun run ./cli/index.ts",
-    "mobile-harness:mcp": "bun run ./mcp/server.ts",
+    "mobile-harness": "bun ./cli/index.ts",
+    "mobile-harness:mcp": "bun ./mcp/server.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

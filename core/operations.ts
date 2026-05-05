@@ -15,6 +15,7 @@ import type {
 import type {
   UiActionResult,
   UiInspectResult,
+  UiTapOptions,
   UiPressOptions,
   UiReadResult,
   UiSelector,
@@ -281,16 +282,71 @@ export const snapshotSessionUi = async (
   targetId: string;
   snapshot: UiSnapshot;
 }> => {
-  const resolved = await resolveWebviewTarget(sessionId, targetId);
-  const snapshot = await (
-    await getBackendForSession(resolved.sessionId)
-  ).snapshotUi(resolved.sessionId, resolved.target.id, options);
+  const resolvedSessionId = await resolveSessionId(sessionId);
+  const backend = await getBackendForSession(resolvedSessionId);
 
-  return {
-    sessionId: resolved.sessionId,
-    targetId: resolved.target.id,
-    snapshot,
-  };
+  try {
+    const resolved = await resolveWebviewTarget(resolvedSessionId, targetId);
+    const snapshot = await backend.snapshotUi(
+      resolved.sessionId,
+      resolved.target.id,
+      options,
+    );
+
+    return {
+      sessionId: resolved.sessionId,
+      targetId: resolved.target.id,
+      snapshot,
+    };
+  } catch (error) {
+    const session = await loadSession(resolvedSessionId);
+    const capabilities = await backend.getCapabilities(resolvedSessionId);
+    if (session.platform !== "ios" || !capabilities.canAutomateNativeUi) {
+      throw error;
+    }
+
+    const snapshot = await backend.snapshotUi(
+      resolvedSessionId,
+      targetId ?? "native",
+      options,
+    );
+
+    return {
+      sessionId: resolvedSessionId,
+      targetId: targetId ?? "native",
+      snapshot,
+    };
+  }
+};
+
+const resolveUiTarget = async (
+  sessionId?: string,
+  targetId?: string,
+): Promise<{
+  sessionId: string;
+  targetId: string;
+}> => {
+  const resolvedSessionId = await resolveSessionId(sessionId);
+  const backend = await getBackendForSession(resolvedSessionId);
+
+  try {
+    const resolved = await resolveWebviewTarget(resolvedSessionId, targetId);
+    return {
+      sessionId: resolved.sessionId,
+      targetId: resolved.target.id,
+    };
+  } catch (error) {
+    const session = await loadSession(resolvedSessionId);
+    const capabilities = await backend.getCapabilities(resolvedSessionId);
+    if (session.platform !== "ios" || !capabilities.canAutomateNativeUi) {
+      throw error;
+    }
+
+    return {
+      sessionId: resolvedSessionId,
+      targetId: targetId ?? "native",
+    };
+  }
 };
 
 export const inspectSessionUi = async (
@@ -302,14 +358,14 @@ export const inspectSessionUi = async (
   targetId: string;
   result: UiInspectResult;
 }> => {
-  const resolved = await resolveWebviewTarget(sessionId, targetId);
+  const resolved = await resolveUiTarget(sessionId, targetId);
   const result = await (
     await getBackendForSession(resolved.sessionId)
-  ).inspectUi(resolved.sessionId, resolved.target.id, selector);
+  ).inspectUi(resolved.sessionId, resolved.targetId, selector);
 
   return {
     sessionId: resolved.sessionId,
-    targetId: resolved.target.id,
+    targetId: resolved.targetId,
     result,
   };
 };
@@ -319,6 +375,10 @@ const performUiAction = async (
     | {
         type: "click";
         selector: UiSelector;
+      }
+    | {
+        type: "tap";
+        point: UiTapOptions;
       }
     | {
         type: "type";
@@ -337,20 +397,26 @@ const performUiAction = async (
   targetId: string;
   result: UiActionResult;
 }> => {
-  const resolved = await resolveWebviewTarget(sessionId, targetId);
+  const resolved = await resolveUiTarget(sessionId, targetId);
   const backend = await getBackendForSession(resolved.sessionId);
   let result: UiActionResult;
 
   if (action.type === "click") {
     result = await backend.clickUi(
       resolved.sessionId,
-      resolved.target.id,
+      resolved.targetId,
       action.selector,
+    );
+  } else if (action.type === "tap") {
+    result = await backend.tapUi(
+      resolved.sessionId,
+      resolved.targetId,
+      action.point,
     );
   } else if (action.type === "type") {
     result = await backend.typeIntoUi(
       resolved.sessionId,
-      resolved.target.id,
+      resolved.targetId,
       action.selector,
       action.text,
       action.options,
@@ -358,20 +424,22 @@ const performUiAction = async (
   } else {
     result = await backend.clearUi(
       resolved.sessionId,
-      resolved.target.id,
+      resolved.targetId,
       action.selector,
     );
   }
 
   await appendTimelineActionIfActive(resolved.sessionId, {
     actionName: action.type === "type" ? "ui.type" : `ui.${action.type}`,
-    selectorSummary: summarizeSelector(action.selector),
+    selectorSummary: action.type === "tap"
+      ? `point:${action.point.x},${action.point.y}`
+      : summarizeSelector(action.selector),
     resultSummary: summarizeActionResult(result),
   });
 
   return {
     sessionId: resolved.sessionId,
-    targetId: resolved.target.id,
+    targetId: resolved.targetId,
     result,
   };
 };
@@ -385,14 +453,14 @@ const performUiRead = async (
   targetId: string;
   result: UiReadResult;
 }> => {
-  const resolved = await resolveWebviewTarget(sessionId, targetId);
+  const resolved = await resolveUiTarget(sessionId, targetId);
   const result = await (
     await getBackendForSession(resolved.sessionId)
-  ).readUi(resolved.sessionId, resolved.target.id, selector);
+  ).readUi(resolved.sessionId, resolved.targetId, selector);
 
   return {
     sessionId: resolved.sessionId,
-    targetId: resolved.target.id,
+    targetId: resolved.targetId,
     result,
   };
 };
@@ -407,10 +475,10 @@ const performUiPress = async (
   targetId: string;
   result: UiActionResult;
 }> => {
-  const resolved = await resolveWebviewTarget(sessionId, targetId);
+  const resolved = await resolveUiTarget(sessionId, targetId);
   const result = await (
     await getBackendForSession(resolved.sessionId)
-  ).pressUi(resolved.sessionId, resolved.target.id, selector, options);
+  ).pressUi(resolved.sessionId, resolved.targetId, selector, options);
 
   await appendTimelineActionIfActive(resolved.sessionId, {
     actionName: "ui.press",
@@ -420,7 +488,7 @@ const performUiPress = async (
 
   return {
     sessionId: resolved.sessionId,
-    targetId: resolved.target.id,
+    targetId: resolved.targetId,
     result,
   };
 };
@@ -431,6 +499,14 @@ export const clickSessionUi = async (
   targetId?: string,
 ) => {
   return await performUiAction({ type: "click", selector }, sessionId, targetId);
+};
+
+export const tapSessionUi = async (
+  point: UiTapOptions,
+  sessionId?: string,
+  targetId?: string,
+) => {
+  return await performUiAction({ type: "tap", point }, sessionId, targetId);
 };
 
 export const typeIntoSessionUi = async (
@@ -481,14 +557,14 @@ export const waitForSessionUi = async (
   targetId: string;
   result: UiWaitResult;
 }> => {
-  const resolved = await resolveWebviewTarget(sessionId, targetId);
+  const resolved = await resolveUiTarget(sessionId, targetId);
   const result = await (
     await getBackendForSession(resolved.sessionId)
-  ).waitForUi(resolved.sessionId, resolved.target.id, condition);
+  ).waitForUi(resolved.sessionId, resolved.targetId, condition);
 
   return {
     sessionId: resolved.sessionId,
-    targetId: resolved.target.id,
+    targetId: resolved.targetId,
     result,
   };
 };

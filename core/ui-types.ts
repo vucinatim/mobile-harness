@@ -35,6 +35,12 @@ export type UiElementSnapshot = {
   visible: boolean;
   checked?: boolean;
   selected?: boolean;
+  bounds?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 };
 
 export type UiSnapshotDetail = "summary" | "standard" | "full";
@@ -106,6 +112,11 @@ export type UiSnapshot = {
 export type UiActionResult = {
   selector: UiSelector;
   matchedElement?: UiElementSnapshot;
+};
+
+export type UiTapOptions = {
+  x: number;
+  y: number;
 };
 
 export type UiInspectResult = {

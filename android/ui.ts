@@ -2,6 +2,7 @@ import { HarnessError } from "../core/errors.ts";
 import type {
   UiActionResult,
   UiInspectResult,
+  UiTapOptions,
   UiPressOptions,
   UiReadResult,
   UiSelector,
@@ -14,17 +15,18 @@ import type {
 } from "../core/ui-types.ts";
 import { evaluateAndroidWebview } from "./cdp.ts";
 
-type UiCommand =
+export type WebviewUiCommand =
   | { type: "snapshot"; options?: UiSnapshotOptions }
   | { type: "inspect"; selector: UiSelector }
   | { type: "click"; selector: UiSelector }
+  | { type: "tap"; point: UiTapOptions }
   | { type: "type"; selector: UiSelector; text: string; options?: UiTypeOptions }
   | { type: "clear"; selector: UiSelector }
   | { type: "press"; selector: UiSelector; options: UiPressOptions }
   | { type: "read"; selector: UiSelector }
   | { type: "waitFor"; condition: UiWaitCondition };
 
-const buildUiExpression = (command: UiCommand) => `
+export const buildUiExpression = (command: WebviewUiCommand) => `
 (async () => {
   const command = ${JSON.stringify(command)};
 
@@ -226,6 +228,7 @@ const buildUiExpression = (command: UiCommand) => `
       "value" in element && typeof element.value === "string"
         ? element.value
         : undefined;
+    const rect = element.getBoundingClientRect();
 
     return {
       id: encodeElementId(createStrategies(element)),
@@ -239,6 +242,12 @@ const buildUiExpression = (command: UiCommand) => `
       href: element instanceof HTMLAnchorElement ? element.href : undefined,
       enabled: isEnabled(element),
       visible: isVisible(element),
+      bounds: {
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      },
       checked:
         element instanceof HTMLInputElement &&
         (element.type === "checkbox" || element.type === "radio")
@@ -751,6 +760,16 @@ const buildUiExpression = (command: UiCommand) => `
     element.click();
   };
 
+  const tapPoint = (point) => {
+    const element = document.elementFromPoint(point.x, point.y);
+    if (!(element instanceof HTMLElement)) {
+      throw new Error("No visible element was found at the requested coordinates.");
+    }
+
+    clickElement(element);
+    return element;
+  };
+
   const actionResult = (selector, element) => ({
     selector,
     matchedElement: toSnapshot(element),
@@ -896,8 +915,11 @@ const buildUiExpression = (command: UiCommand) => `
     case "click": {
       const element = getSingleElement(command.selector);
       clickElement(element);
-      await settleUi();
       return actionResult(command.selector, element);
+    }
+    case "tap": {
+      const element = tapPoint(command.point);
+      return actionResult({}, element);
     }
     case "type": {
       const element = getSingleElement(command.selector);
@@ -936,7 +958,6 @@ const buildUiExpression = (command: UiCommand) => `
     case "press": {
       const element = getSingleElement(command.selector);
       pressElement(element, command.options);
-      await settleUi();
       return actionResult(command.selector, element);
     }
     case "read": {
@@ -955,7 +976,7 @@ const executeUiCommand = async <T>(
   deviceId: string,
   appId: string,
   targetId: string,
-  command: UiCommand,
+  command: WebviewUiCommand,
 ): Promise<T> => {
   const result = await evaluateAndroidWebview(
     deviceId,
@@ -1021,6 +1042,22 @@ export const clickAndroidUi = async (
     return await executeUiCommand<UiActionResult>(deviceId, appId, targetId, {
       type: "click",
       selector,
+    });
+  } catch (error) {
+    return wrapUiError(error);
+  }
+};
+
+export const tapAndroidUi = async (
+  deviceId: string,
+  appId: string,
+  targetId: string,
+  point: UiTapOptions,
+): Promise<UiActionResult> => {
+  try {
+    return await executeUiCommand<UiActionResult>(deviceId, appId, targetId, {
+      type: "tap",
+      point,
     });
   } catch (error) {
     return wrapUiError(error);

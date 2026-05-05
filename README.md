@@ -26,6 +26,9 @@ Current scaffold status:
 - CLI entrypoint
 - iOS backend stub
 - MCP server with bounded agent-facing read tools
+- phased iOS parity plan in `docs/ios-harness-phased-plan.md`
+- Capacitor-first iOS architecture plan in `docs/capacitor-ios-first-plan.md`
+- Capacitor-first iOS control plan in `docs/capacitor-ios-control-plan.md`
 
 Install from GitHub today:
 
@@ -42,6 +45,8 @@ vucinatim-mobile-harness
 Run:
 
 ```bash
+mobile-harness setup capacitor ios
+mobile-harness setup ios
 mobile-harness devices list
 mobile-harness session attach --platform android --device <serial> --app com.example.app --launch
 mobile-harness logs tail --session <session-id>
@@ -110,5 +115,13 @@ Current MCP tools:
 - `mobile_timeline_read`
 
 The canonical debugging path is session attach plus the rolling timeline tools.
+
+For Capacitor iOS apps we own, the preferred path is:
+
+```bash
+mobile-harness setup capacitor ios
+```
+
+That installs the managed native WKWebView bridge used for iOS `console` and `network` timeline events without depending on Web Inspector as the main debugging path.
 
 The MCP surface intentionally exposes bounded `read_*` tools for logs, console, and network instead of open-ended tails. That keeps tool calls deterministic for agents while the CLI remains the live streaming interface.

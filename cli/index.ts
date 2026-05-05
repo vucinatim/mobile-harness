@@ -12,9 +12,11 @@ import {
   snapshotSessionUi,
   streamSessionConsole,
   streamSessionNetwork,
+  tapSessionUi,
   typeIntoSessionUi,
   waitForSessionUi,
 } from "../core/operations.ts";
+import { loadSession } from "../core/storage.ts";
 import {
   getTimelineStatus,
   markTimeline,
@@ -28,6 +30,10 @@ import type {
 } from "../core/timeline-types.ts";
 import { createSession, listDevices, parsePlatform } from "../core/registry.ts";
 import { captureSessionScreenshot, tailSessionLogs } from "../core/registry.ts";
+import { setupCapacitorIOSBridge } from "../ios/capacitor-setup.ts";
+import { bootstrapIOSHost, getIOSBootstrapStatus } from "../ios/setup.ts";
+import { bootstrapWda, getInstalledWdaRunnerBundleId } from "../ios/wda.ts";
+import { ensureIOSBridgeCollector, runIOSBridgeCollector } from "../ios/bridge-collector.ts";
 import type {
   AppSession,
   DeviceSummary,
@@ -38,6 +44,7 @@ import type {
   UiSelector,
   UiSnapshot,
   UiSnapshotDetail,
+  UiTapOptions,
   UiWaitCondition,
 } from "../core/ui-types.ts";
 
@@ -53,7 +60,11 @@ const printHelp = () => {
 
 Usage:
   bun run mobile-harness devices list [--platform android|ios|all] [--json]
-  bun run mobile-harness session attach --platform android --device <serial> --app <appId> [--launch] [--json]
+  bun run mobile-harness session attach --platform android|ios --device <serial> --app <appId> [--launch] [--json]
+  bun run mobile-harness setup ios [--json]
+  bun run mobile-harness setup ios --bootstrap-system [--json]
+  bun run mobile-harness setup ios --bootstrap-wda [--device <udid>] [--team-id <TEAMID>] [--bundle-id <bundleId>] [--json]
+  bun run mobile-harness setup capacitor ios [--project-root <path>] [--json]
   bun run mobile-harness logs tail [--session <id>] [--filter <text>]
   bun run mobile-harness screenshot [--session <id>] [--output <path>] [--json]
   bun run mobile-harness webviews list [--session <id>] [--json]
@@ -68,6 +79,7 @@ Usage:
   bun run mobile-harness ui snapshot [--session <id>] [--target <id>] [--detail summary|standard|full] [--json]
   bun run mobile-harness ui inspect [--session <id>] [--target <id>] (--element <id> | --text <text> | --name <name> | --placeholder <text> | --selector <css>) [--role <role>] [--json]
   bun run mobile-harness ui click [--session <id>] [--target <id>] (--element <id> | --text <text> | --name <name> | --placeholder <text> | --selector <css>) [--role <role>] [--json]
+  bun run mobile-harness ui tap [--session <id>] [--target <id>] --x <px> --y <px> [--json]
   bun run mobile-harness ui type [--session <id>] [--target <id>] (--element <id> | --name <name> | --placeholder <text> | --selector <css>) --text <value> [--append] [--submit] [--json]
   bun run mobile-harness ui clear [--session <id>] [--target <id>] (--element <id> | --name <name> | --placeholder <text> | --selector <css>) [--json]
   bun run mobile-harness ui press [--session <id>] [--target <id>] (--element <id> | --text <text> | --name <name> | --placeholder <text> | --selector <css>) --key <key> [--code <code>] [--json]
@@ -232,6 +244,220 @@ const runSessionAttach = async (args: string[]) => {
   }
 
   printSession(session);
+};
+
+const runSetupIOS = async (args: string[]) => {
+  let json = false;
+  let bootstrapSystem = false;
+  let bootstrapWdaRunner = false;
+  let deviceId: string | undefined;
+  let teamId: string | undefined;
+  let bundleId: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (arg === "--bootstrap-system") {
+      bootstrapSystem = true;
+      continue;
+    }
+
+    if (arg === "--bootstrap-wda") {
+      bootstrapWdaRunner = true;
+      continue;
+    }
+
+    if (arg === "--device") {
+      deviceId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--team-id") {
+      teamId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--bundle-id") {
+      bundleId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  if (bootstrapSystem) {
+    const isRoot =
+      typeof process.getuid === "function" ? process.getuid() === 0 : false;
+
+    if (!isRoot) {
+      const status = await getIOSBootstrapStatus();
+      throw new HarnessError(
+        "invalid_input",
+        `System bootstrap must be run as root. Re-run once with: ${status.manualBootstrapCommand ?? "sudo mobile-harness setup ios --bootstrap-system"}`,
+      );
+    }
+
+    const status = await bootstrapIOSHost();
+    if (json) {
+      console.log(JSON.stringify(status, null, 2));
+      return;
+    }
+
+    console.log("Installed and started the iOS tunneld launch daemon.");
+    console.log(`Label: ${status.launchDaemonLabel}`);
+    console.log(`Path:  ${status.launchDaemonPath}`);
+    return;
+  }
+
+  if (bootstrapWdaRunner) {
+    const status = await getIOSBootstrapStatus();
+    const resolvedDeviceId = deviceId ?? status.checkedDeviceId;
+    if (!resolvedDeviceId) {
+      throw new HarnessError(
+        "invalid_input",
+        "Could not determine the connected iPhone for WDA bootstrap. Pass --device <udid>.",
+      );
+    }
+
+    const result = await bootstrapWda(resolvedDeviceId, {
+      teamId,
+      bundleId,
+    });
+
+    if (json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    console.log("Installed the iOS WDA runner.");
+    console.log(`Device:      ${resolvedDeviceId}`);
+    console.log(`Bundle:      ${result.xctrunnerBundleId}`);
+    console.log(`Source:      ${result.sourceRoot}`);
+    console.log(`Built app:   ${result.appPath}`);
+    console.log("If iOS shows an untrusted developer prompt, trust the developer in Settings -> General -> VPN & Device Management, then retry the UI command.");
+    return;
+  }
+
+  const status = await getIOSBootstrapStatus();
+  const installedWdaRunner = status.ready && status.checkedDeviceId
+    ? await getInstalledWdaRunnerBundleId(status.checkedDeviceId)
+    : null;
+
+  if (status.ready) {
+    if (json) {
+      console.log(
+        JSON.stringify(
+          {
+            ...status,
+            wdaInstalledBundleId: installedWdaRunner,
+          },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+
+    console.log("iOS host bootstrap is ready.");
+    console.log(`Tunnel: ${status.tunnelRunning ? "running" : "stopped"}`);
+    console.log(`WDA:    ${installedWdaRunner ?? "not installed"}`);
+    return;
+  }
+
+  if (status.canBootstrapAutomatically) {
+    const nextStatus = await bootstrapIOSHost();
+    if (json) {
+      console.log(JSON.stringify(nextStatus, null, 2));
+      return;
+    }
+
+    console.log("Installed and started the iOS tunneld launch daemon.");
+    console.log(`Label: ${nextStatus.launchDaemonLabel}`);
+    console.log(`Path:  ${nextStatus.launchDaemonPath}`);
+    return;
+  }
+
+  if (json) {
+    console.log(JSON.stringify(status, null, 2));
+    return;
+  }
+
+  console.log("iOS host bootstrap is not ready yet.");
+  console.log(`uvx installed:   ${status.uvxInstalled ? "yes" : "no"}`);
+  console.log(`tunnel running:  ${status.tunnelRunning ? "yes" : "no"}`);
+  console.log(`daemon installed:${status.launchDaemonInstalled ? "yes" : "no"}`);
+  console.log("");
+  if (status.nextStep) {
+    console.log(status.nextStep);
+    console.log("");
+  }
+  console.log("Run this once:");
+  console.log(
+    status.manualBootstrapCommand ??
+      "sudo mobile-harness setup ios --bootstrap-system",
+  );
+};
+
+const runSetupCapacitorIOS = async (args: string[]) => {
+  let json = false;
+  let projectRoot: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (arg === "--project-root") {
+      projectRoot = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  const result = await setupCapacitorIOSBridge(projectRoot);
+
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (result.changedFiles.length === 0) {
+    console.log("Capacitor iOS bridge is already current.");
+  } else {
+    console.log("Installed the Capacitor iOS mobile-harness bridge.");
+  }
+  console.log(`Project: ${result.projectRoot}`);
+  console.log(`Module:  ${result.moduleName}`);
+  console.log(`Bridge:  ${result.bridgeFilePath}`);
+  if (result.changedFiles.length > 0) {
+    console.log("Changed:");
+    for (const filePath of result.changedFiles) {
+      console.log(`  - ${filePath}`);
+    }
+  }
+  if (result.warnings.length > 0) {
+    console.log("Warnings:");
+    for (const warning of result.warnings) {
+      console.log(`  - ${warning}`);
+    }
+  }
 };
 
 type SessionRefOptions = {
@@ -650,6 +876,10 @@ const runTimelineReset = async (args: string[]) => {
   const options = parseRecordBaseOptions(args);
   const sessionId = await resolveSessionId(options.sessionId);
   const state = await resetTimeline(sessionId, options.targetId);
+  const session = await loadSession(sessionId);
+  if (session.platform === "ios" && session.integrations?.capacitorIOSBridge) {
+    await ensureIOSBridgeCollector();
+  }
 
   if (options.json) {
     console.log(JSON.stringify(state, null, 2));
@@ -891,6 +1121,13 @@ type UiSelectorOptions = {
   targetId?: string;
 };
 
+type UiTapCliOptions = {
+  point: UiTapOptions;
+  json: boolean;
+  sessionId?: string;
+  targetId?: string;
+};
+
 const parseUiSelectorOptions = (
   args: string[],
   options?: {
@@ -992,6 +1229,65 @@ const parseUiSelectorOptions = (
   };
 };
 
+const parseUiTapOptions = (args: string[]): UiTapCliOptions => {
+  let sessionId: string | undefined;
+  let targetId: string | undefined;
+  let json = false;
+  let x: number | undefined;
+  let y: number | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (arg === "--session") {
+      sessionId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--target") {
+      targetId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--x") {
+      x = Number.parseFloat(args[index + 1] ?? "");
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--y") {
+      y = Number.parseFloat(args[index + 1] ?? "");
+      index += 1;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new HarnessError(
+      "invalid_input",
+      "ui tap requires numeric --x <px> and --y <px> values.",
+    );
+  }
+
+  return {
+    sessionId,
+    targetId,
+    point: { x: x!, y: y! },
+    json,
+  };
+};
+
 const printUiElements = (elements: UiElementSnapshot[]) => {
   console.table(
     elements.map((element) => ({
@@ -1003,6 +1299,10 @@ const printUiElements = (elements: UiElementSnapshot[]) => {
       value: element.value ?? "",
       enabled: element.enabled,
       visible: element.visible,
+      x: element.bounds?.x ?? "",
+      y: element.bounds?.y ?? "",
+      width: element.bounds?.width ?? "",
+      height: element.bounds?.height ?? "",
     })),
   );
 };
@@ -1117,6 +1417,10 @@ const runUiInspect = async (args: string[]) => {
       value: result.result.matchedElement.value ?? "",
       enabled: result.result.matchedElement.enabled,
       visible: result.result.matchedElement.visible,
+      x: result.result.matchedElement.bounds?.x ?? "",
+      y: result.result.matchedElement.bounds?.y ?? "",
+      width: result.result.matchedElement.bounds?.width ?? "",
+      height: result.result.matchedElement.bounds?.height ?? "",
     },
   ]);
 };
@@ -1137,6 +1441,22 @@ const runUiClick = async (args: string[]) => {
   console.log(
     `Clicked ${result.result.matchedElement?.role ?? "element"} on target ${result.targetId}.`,
   );
+};
+
+const runUiTap = async (args: string[]) => {
+  const options = parseUiTapOptions(args);
+  const result = await tapSessionUi(
+    options.point,
+    options.sessionId,
+    options.targetId,
+  );
+
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`Tapped (${options.point.x}, ${options.point.y}) on target ${result.targetId}.`);
 };
 
 const runUiType = async (args: string[]) => {
@@ -1423,6 +1743,16 @@ const main = async () => {
     return;
   }
 
+  if (command === "setup" && subcommand === "ios") {
+    await runSetupIOS(args.slice(2));
+    return;
+  }
+
+  if (command === "setup" && subcommand === "capacitor" && subsubcommand === "ios") {
+    await runSetupCapacitorIOS(args.slice(3));
+    return;
+  }
+
   if (command === "logs" && subcommand === "tail") {
     await runLogsTail(args.slice(2));
     return;
@@ -1483,6 +1813,11 @@ const main = async () => {
     return;
   }
 
+  if (command === "__ios-bridge-collector") {
+    await runIOSBridgeCollector();
+    return;
+  }
+
   if (command === "ui" && subcommand === "snapshot") {
     await runUiSnapshot(args.slice(2));
     return;
@@ -1495,6 +1830,11 @@ const main = async () => {
 
   if (command === "ui" && subcommand === "click") {
     await runUiClick(args.slice(2));
+    return;
+  }
+
+  if (command === "ui" && subcommand === "tap") {
+    await runUiTap(args.slice(2));
     return;
   }
 
