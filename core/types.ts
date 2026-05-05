@@ -51,6 +51,7 @@ export type Artifact =
 export type LogEvent = {
   timestamp?: string;
   level?: string;
+  tag?: string;
   message: string;
 };
 

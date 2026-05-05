@@ -120,7 +120,19 @@ const getForwardedDevtoolsSession = (
 const fetchDevtoolsList = async (
   localPort: number,
 ): Promise<AndroidDevtoolsListEntry[]> => {
-  const response = await fetch(`http://127.0.0.1:${localPort}/json/list`);
+  let response: Response;
+  try {
+    response = await fetch(`http://127.0.0.1:${localPort}/json/list`, {
+      signal: AbortSignal.timeout(2_000),
+    });
+  } catch (error) {
+    throw new HarnessError(
+      "command_failed",
+      `Timed out while fetching devtools targets from local port ${localPort}.`,
+      { localPort, cause: error instanceof Error ? error.message : String(error) },
+    );
+  }
+
   if (!response.ok) {
     throw new HarnessError(
       "command_failed",

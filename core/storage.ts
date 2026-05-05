@@ -10,6 +10,7 @@ type SessionRecord = AppSession & {
 const harnessRoot = path.join(process.cwd(), ".mobile-harness");
 const sessionsDir = path.join(harnessRoot, "sessions");
 const artifactsDir = path.join(harnessRoot, "artifacts");
+const timelineDir = path.join(harnessRoot, "timeline");
 
 const ensureDir = async (dirPath: string) => {
   await mkdir(dirPath, { recursive: true });
@@ -21,6 +22,7 @@ const sessionFilePath = (sessionId: string) =>
 export const ensureHarnessStorage = async () => {
   await ensureDir(sessionsDir);
   await ensureDir(artifactsDir);
+  await ensureDir(timelineDir);
 };
 
 export const saveSession = async (session: SessionRecord) => {
@@ -66,5 +68,20 @@ export const getArtifactPath = async (
   await ensureHarnessStorage();
   const dir = path.join(artifactsDir, sessionId);
   await ensureDir(dir);
+  return path.join(dir, filename);
+};
+
+export const getTimelineDir = async (sessionId: string): Promise<string> => {
+  await ensureHarnessStorage();
+  const dir = path.join(timelineDir, sessionId);
+  await ensureDir(dir);
+  return dir;
+};
+
+export const getTimelineFilePath = async (
+  sessionId: string,
+  filename: string,
+): Promise<string> => {
+  const dir = await getTimelineDir(sessionId);
   return path.join(dir, filename);
 };

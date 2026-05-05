@@ -20,6 +20,7 @@ Current scaffold status:
 - Android WebView screenshot capture over CDP
 - Android WebView console streaming over CDP
 - Android WebView network streaming over CDP
+- session-scoped rolling timeline with markers and buffered reads
 - shared core types and backend contract
 - shared session operations used by both CLI and MCP
 - CLI entrypoint
@@ -50,6 +51,10 @@ mobile-harness webviews screenshot --session <session-id> --target <target-id>
 mobile-harness js eval --session <session-id> --target <target-id> --expression "document.title"
 mobile-harness console tail --session <session-id> --target <target-id>
 mobile-harness network tail --session <session-id> --target <target-id>
+mobile-harness timeline mark --session <session-id> --label "before confirm and solve"
+mobile-harness timeline read --session <session-id> --since-marker "before confirm and solve"
+mobile-harness timeline reset --session <session-id>
+mobile-harness timeline status --session <session-id>
 ```
 
 Run MCP:
@@ -85,6 +90,8 @@ Publishing:
 - The intended npm package name is `vucinatim-mobile-harness`.
 - To activate npm publishing, add an `NPM_TOKEN` repository secret in GitHub, then push a version tag such as `v0.1.0`.
 
+Session attach automatically starts the rolling timeline for that session. Timeline data lives in the consuming project's `.mobile-harness/` directory, not in this package repo.
+
 Current MCP tools:
 
 - `mobile_list_devices`
@@ -97,5 +104,11 @@ Current MCP tools:
 - `mobile_read_logs`
 - `mobile_read_console`
 - `mobile_read_network`
+- `mobile_timeline_status`
+- `mobile_timeline_reset`
+- `mobile_timeline_mark`
+- `mobile_timeline_read`
+
+The canonical debugging path is session attach plus the rolling timeline tools.
 
 The MCP surface intentionally exposes bounded `read_*` tools for logs, console, and network instead of open-ended tails. That keeps tool calls deterministic for agents while the CLI remains the live streaming interface.

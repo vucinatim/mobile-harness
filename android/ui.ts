@@ -440,7 +440,11 @@ const buildUiExpression = (command: UiCommand) => `
 
     if (title) {
       const titleSlug = normalize(title);
-      if (titleSlug && titleSlug !== "classology" && titleSlug !== routeSegment) {
+      if (
+        titleSlug &&
+        titleSlug !== routeSegment &&
+        titleSlug.includes("-")
+      ) {
         return routeSegment + "-" + titleSlug;
       }
     }

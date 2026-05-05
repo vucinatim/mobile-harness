@@ -1,6 +1,7 @@
 import { createBackends, tailSessionLogs } from "./registry.ts";
 import { HarnessError } from "./errors.ts";
 import { listSessions, loadSession } from "./storage.ts";
+import { appendTimelineActionIfActive } from "./timeline.ts";
 import type {
   Artifact,
   ConsoleEvent,
@@ -35,6 +36,41 @@ const DEFAULT_TIMEOUT_MS = 2_000;
 const getBackendForSession = async (sessionId: string) => {
   const session = await loadSession(sessionId);
   return createBackends()[session.platform];
+};
+
+const summarizeSelector = (selector: UiSelector): string | undefined => {
+  if ("elementId" in selector && selector.elementId) {
+    return `element:${selector.elementId}`;
+  }
+
+  if ("name" in selector && selector.name) {
+    return `name:${selector.name}`;
+  }
+
+  if ("placeholder" in selector && selector.placeholder) {
+    return `placeholder:${selector.placeholder}`;
+  }
+
+  if ("text" in selector && selector.text) {
+    return selector.role
+      ? `${selector.role}:${selector.text}`
+      : `text:${selector.text}`;
+  }
+
+  if ("selector" in selector && selector.selector) {
+    return `selector:${selector.selector}`;
+  }
+
+  return undefined;
+};
+
+const summarizeActionResult = (result: UiActionResult): string | undefined => {
+  const matched = result.matchedElement;
+  if (!matched) {
+    return undefined;
+  }
+
+  return matched.text ?? matched.name ?? matched.placeholder ?? matched.label;
 };
 
 export const resolveSessionId = async (sessionId?: string): Promise<string> => {
@@ -327,6 +363,12 @@ const performUiAction = async (
     );
   }
 
+  await appendTimelineActionIfActive(resolved.sessionId, {
+    actionName: action.type === "type" ? "ui.type" : `ui.${action.type}`,
+    selectorSummary: summarizeSelector(action.selector),
+    resultSummary: summarizeActionResult(result),
+  });
+
   return {
     sessionId: resolved.sessionId,
     targetId: resolved.target.id,
@@ -369,6 +411,12 @@ const performUiPress = async (
   const result = await (
     await getBackendForSession(resolved.sessionId)
   ).pressUi(resolved.sessionId, resolved.target.id, selector, options);
+
+  await appendTimelineActionIfActive(resolved.sessionId, {
+    actionName: "ui.press",
+    selectorSummary: summarizeSelector(selector),
+    resultSummary: summarizeActionResult(result),
+  });
 
   return {
     sessionId: resolved.sessionId,

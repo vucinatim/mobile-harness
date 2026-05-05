@@ -17,6 +17,12 @@ import {
   waitForSessionUi,
 } from "../core/operations.ts";
 import {
+  getTimelineStatus,
+  markTimeline,
+  readTimeline,
+  resetTimeline,
+} from "../core/timeline.ts";
+import {
   captureSessionScreenshot,
   createSession,
   getSessionCapabilities,
@@ -47,7 +53,7 @@ const defineTool = <const Name extends string, Schema extends z.ZodType>(
 
 type AnyToolDefinition = ToolDefinition<string, z.ZodTypeAny>;
 
-const SERVER_NAME = "classology-mobile-harness";
+const SERVER_NAME = "mobile-harness";
 const SERVER_VERSION = "0.1.0";
 const JSON_RPC_VERSION = "2.0";
 const SUPPORTED_PROTOCOL_VERSIONS = [
@@ -80,6 +86,7 @@ const uiRoleSchema = z.enum([
 ]);
 
 const uiSnapshotDetailSchema = z.enum(["summary", "standard", "full"]);
+const timelineReadDetailSchema = z.enum(["summary", "standard", "full"]);
 
 const uiSelectorSchema = z
   .object({
@@ -341,6 +348,87 @@ const tools = [
           targetId: input.targetId,
           events,
         },
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_timeline_status",
+    description:
+      "Return the current session timeline status, including worker health for the always-on rolling timeline.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1),
+    }),
+    async execute(input) {
+      const status = await getTimelineStatus(input.sessionId);
+
+      return {
+        text: status
+          ? `Loaded timeline status for session ${input.sessionId}.`
+          : `No timeline found for session ${input.sessionId}.`,
+        structuredContent: {
+          sessionId: input.sessionId,
+          status,
+        },
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_timeline_reset",
+    description:
+      "Reset the rolling session timeline and immediately resume collection for a fresh repro window.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1),
+      targetId: z.string().min(1).optional(),
+    }),
+    async execute(input) {
+      const state = await resetTimeline(input.sessionId, input.targetId);
+
+      return {
+        text: `Reset timeline for session ${state.sessionId}.`,
+        structuredContent: {
+          state,
+        },
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_timeline_mark",
+    description:
+      "Add a named marker to the rolling session timeline so later reads can focus on a specific user or agent action window.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1),
+      label: z.string().min(1),
+      note: z.string().min(1).optional(),
+    }),
+    async execute(input) {
+      const event = await markTimeline(input.sessionId, input.label, input.note);
+
+      return {
+        text: `Added timeline marker "${event.label}" to session ${input.sessionId}.`,
+        structuredContent: {
+          sessionId: input.sessionId,
+          event,
+        },
+      };
+    },
+  }),
+  defineTool({
+    name: "mobile_timeline_read",
+    description:
+      "Read a compact summary or detailed slice of the always-on rolling session timeline.",
+    inputSchema: z.object({
+      sessionId: z.string().min(1),
+      sinceMarker: z.string().min(1).optional(),
+      last: z.number().int().min(1).max(500).optional(),
+      detail: timelineReadDetailSchema.optional(),
+      errorsOnly: z.boolean().optional(),
+    }),
+    async execute(input) {
+      const result = await readTimeline(input.sessionId, input);
+
+      return {
+        text: `Read ${result.summary.returnedEvents} timeline event${result.summary.returnedEvents === 1 ? "" : "s"} from session ${input.sessionId}.`,
+        structuredContent: result as Record<string, unknown>,
       };
     },
   }),
@@ -683,7 +771,7 @@ const handleInitialize = async (id: JsonRpcId, params: unknown) => {
         version: SERVER_VERSION,
       },
       instructions:
-        "Android-first mobile debugging harness for Classology. Use device/session tools first, then WebView tools once a session is attached.",
+        "Android-first mobile debugging harness. Use device and session tools first, then WebView tools once a session is attached.",
     }),
   );
 };

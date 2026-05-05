@@ -60,6 +60,39 @@ import {
   waitForAndroidUi,
 } from "./ui.ts";
 
+const parseAndroidLogLine = (line: string): LogEvent => {
+  const match = line.match(
+    /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s+([VDIWEAF])\/([^(:]+)(?:\([^)]*\))?:\s?(.*)$/,
+  );
+
+  if (!match) {
+    return { message: line };
+  }
+
+  const [, timestamp, rawLevel, tag, message] = match;
+  const level =
+    rawLevel === "V"
+      ? "verbose"
+      : rawLevel === "D"
+        ? "debug"
+        : rawLevel === "I"
+          ? "info"
+          : rawLevel === "W"
+            ? "warn"
+            : rawLevel === "E"
+              ? "error"
+              : rawLevel === "A"
+                ? "assert"
+                : "fatal";
+
+  return {
+    timestamp,
+    level,
+    message: message || line,
+    tag,
+  } as LogEvent & { tag?: string };
+};
+
 export class AndroidHarnessBackend implements HarnessBackend {
   async listDevices(): Promise<DeviceSummary[]> {
     return await listAndroidDevices();
@@ -129,7 +162,7 @@ export class AndroidHarnessBackend implements HarnessBackend {
           continue;
         }
 
-        yield { message: line };
+        yield parseAndroidLogLine(line);
       }
     } finally {
       subprocess.kill();

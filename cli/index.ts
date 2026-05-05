@@ -15,6 +15,17 @@ import {
   typeIntoSessionUi,
   waitForSessionUi,
 } from "../core/operations.ts";
+import {
+  getTimelineStatus,
+  markTimeline,
+  readTimeline,
+  runRecordingWorker,
+  resetTimeline,
+} from "../core/timeline.ts";
+import type {
+  RecorderWorkerKind,
+  RecordingReadDetail,
+} from "../core/timeline-types.ts";
 import { createSession, listDevices, parsePlatform } from "../core/registry.ts";
 import { captureSessionScreenshot, tailSessionLogs } from "../core/registry.ts";
 import type {
@@ -50,6 +61,10 @@ Usage:
   bun run mobile-harness js eval [--session <id>] [--target <id>] --expression <code> [--json]
   bun run mobile-harness console tail [--session <id>] [--target <id>] [--json]
   bun run mobile-harness network tail [--session <id>] [--target <id>] [--json]
+  bun run mobile-harness timeline status [--session <id>] [--json]
+  bun run mobile-harness timeline reset [--session <id>] [--target <id>] [--json]
+  bun run mobile-harness timeline mark [--session <id>] --label <text> [--note <text>] [--json]
+  bun run mobile-harness timeline read [--session <id>] [--since-marker <label>] [--last <n>] [--detail summary|standard|full] [--errors-only] [--json]
   bun run mobile-harness ui snapshot [--session <id>] [--target <id>] [--detail summary|standard|full] [--json]
   bun run mobile-harness ui inspect [--session <id>] [--target <id>] (--element <id> | --text <text> | --name <name> | --placeholder <text> | --selector <css>) [--role <role>] [--json]
   bun run mobile-harness ui click [--session <id>] [--target <id>] (--element <id> | --text <text> | --name <name> | --placeholder <text> | --selector <css>) [--role <role>] [--json]
@@ -61,6 +76,7 @@ Usage:
 
 Notes:
   Session defaults to the most recent attached session when omitted.
+  Session attach automatically starts the rolling session timeline.
   WebView target defaults to the single attached or only available target when omitted.
 `);
 };
@@ -199,6 +215,7 @@ const printSession = (session: AppSession) => {
   console.log(`  device:   ${session.deviceId}`);
   console.log(`  app:      ${session.appId}`);
   console.log(`  started:  ${session.startedAt}`);
+  console.log(`  timeline: active`);
 };
 
 const runSessionAttach = async (args: string[]) => {
@@ -588,6 +605,283 @@ const runNetworkTail = async (args: string[]) => {
       `[failed] ${event.method} ${event.url} ${event.errorText ?? ""}`.trim(),
     );
   }
+};
+
+type RecordBaseOptions = {
+  sessionId?: string;
+  targetId?: string;
+  json: boolean;
+};
+
+const parseRecordBaseOptions = (args: string[]): RecordBaseOptions => {
+  let sessionId: string | undefined;
+  let targetId: string | undefined;
+  let json = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (arg === "--session") {
+      sessionId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--target") {
+      targetId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  return { sessionId, targetId, json };
+};
+
+const runTimelineReset = async (args: string[]) => {
+  const options = parseRecordBaseOptions(args);
+  const sessionId = await resolveSessionId(options.sessionId);
+  const state = await resetTimeline(sessionId, options.targetId);
+
+  if (options.json) {
+    console.log(JSON.stringify(state, null, 2));
+    return;
+  }
+
+  console.log(`Reset timeline for session ${state.sessionId}`);
+  console.log(`Target: ${state.targetId}`);
+};
+
+const runTimelineStatus = async (args: string[]) => {
+  const options = parseRecordBaseOptions(args);
+  const sessionId = await resolveSessionId(options.sessionId);
+  const status = await getTimelineStatus(sessionId);
+
+  if (options.json) {
+    console.log(JSON.stringify(status, null, 2));
+    return;
+  }
+
+  if (!status) {
+    console.log(`No timeline found for session ${sessionId}.`);
+    return;
+  }
+
+  console.log(`Session: ${status.sessionId}`);
+  console.log(`Active:  ${status.active ? "yes" : "no"}`);
+  console.log(`Target:  ${status.targetId}`);
+  console.log(`Started: ${status.startedAt}`);
+  if (status.stoppedAt) {
+    console.log(`Stopped: ${status.stoppedAt}`);
+  }
+  console.log("");
+  console.table(status.workers);
+};
+
+const runTimelineMark = async (args: string[]) => {
+  let sessionId: string | undefined;
+  let json = false;
+  let label = "";
+  let note: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    if (arg === "--session") {
+      sessionId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--label") {
+      label = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--note") {
+      note = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  if (!label) {
+    throw new HarnessError(
+      "invalid_input",
+      "Missing required option --label <text>.",
+    );
+  }
+
+  const resolvedSessionId = await resolveSessionId(sessionId);
+  const event = await markTimeline(resolvedSessionId, label, note);
+
+  if (json) {
+    console.log(JSON.stringify(event, null, 2));
+    return;
+  }
+
+  console.log(`Added marker "${event.label}" to session ${resolvedSessionId}.`);
+};
+
+const runTimelineRead = async (args: string[]) => {
+  let sessionId: string | undefined;
+  let json = false;
+  let sinceMarker: string | undefined;
+  let last: number | undefined;
+  let detail: RecordingReadDetail | undefined;
+  let errorsOnly = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    if (arg === "--session") {
+      sessionId = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--since-marker") {
+      sinceMarker = args[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--last") {
+      last = Number.parseInt(args[index + 1] ?? "", 10);
+      index += 1;
+      continue;
+    }
+    if (arg === "--detail") {
+      const value = args[index + 1] ?? "";
+      if (value !== "summary" && value !== "standard" && value !== "full") {
+        throw new HarnessError(
+          "invalid_input",
+          'Invalid --detail value. Use "summary", "standard", or "full".',
+        );
+      }
+      detail = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--errors-only") {
+      errorsOnly = true;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  const resolvedSessionId = await resolveSessionId(sessionId);
+  const result = await readTimeline(resolvedSessionId, {
+    sinceMarker,
+    last,
+    detail,
+    errorsOnly,
+  });
+
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`Session: ${resolvedSessionId}`);
+  console.log(`Active:  ${result.summary.active ? "yes" : "no"}`);
+  console.log(`Events:  ${result.summary.returnedEvents}/${result.summary.totalEvents}`);
+  if (sinceMarker) {
+    console.log(`Since:   marker "${sinceMarker}"`);
+  }
+
+  if (result.summary.errors.length > 0) {
+    console.log("");
+    console.log("Errors:");
+    console.table(result.summary.errors);
+  }
+
+  if (result.summary.networkFailures.length > 0) {
+    console.log("");
+    console.log("Network failures:");
+    console.table(result.summary.networkFailures);
+  }
+
+  if (result.summary.actions.length > 0) {
+    console.log("");
+    console.log("Actions:");
+    console.table(result.summary.actions);
+  }
+
+  if (result.events && result.events.length > 0) {
+    console.log("");
+    console.log("Events:");
+    console.table(
+      result.events.map((event) => ({
+        timestamp: event.timestamp,
+        kind: event.kind,
+        severity: event.severity,
+        summary: event.summary,
+      })),
+    );
+  }
+};
+
+const runRecordWorker = async (args: string[]) => {
+  const [kind, ...rest] = args;
+  if (
+    kind !== "nativeLog" &&
+    kind !== "console" &&
+    kind !== "network"
+  ) {
+    throw new HarnessError(
+      "invalid_input",
+      `Unknown timeline worker kind "${kind ?? ""}".`,
+    );
+  }
+
+  let sessionId = "";
+  let targetId = "";
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === "--session") {
+      sessionId = rest[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+    if (arg === "--target") {
+      targetId = rest[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    throw new HarnessError("invalid_input", `Unknown option "${arg}".`, {
+      arg,
+    });
+  }
+
+  if (!sessionId || !targetId) {
+    throw new HarnessError(
+      "invalid_input",
+      "timeline worker requires --session <id> and --target <id>.",
+    );
+  }
+
+  await runRecordingWorker(kind as RecorderWorkerKind, sessionId, targetId);
 };
 
 type UiSelectorOptions = {
@@ -1161,6 +1455,31 @@ const main = async () => {
 
   if (command === "network" && subcommand === "tail") {
     await runNetworkTail(args.slice(2));
+    return;
+  }
+
+  if (command === "timeline" && subcommand === "status") {
+    await runTimelineStatus(args.slice(2));
+    return;
+  }
+
+  if (command === "timeline" && subcommand === "reset") {
+    await runTimelineReset(args.slice(2));
+    return;
+  }
+
+  if (command === "timeline" && subcommand === "mark") {
+    await runTimelineMark(args.slice(2));
+    return;
+  }
+
+  if (command === "timeline" && subcommand === "read") {
+    await runTimelineRead(args.slice(2));
+    return;
+  }
+
+  if (command === "__timeline-worker") {
+    await runRecordWorker(args.slice(1));
     return;
   }
 

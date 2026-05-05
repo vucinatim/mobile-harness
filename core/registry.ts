@@ -11,6 +11,7 @@ import type {
 import type { DeviceCapabilities } from "./capabilities.ts";
 import { HarnessError } from "./errors.ts";
 import { loadSession } from "./storage.ts";
+import { ensureTimeline } from "./timeline.ts";
 import { AndroidHarnessBackend } from "../android/backend.ts";
 import { IOSHarnessBackend } from "../ios/backend.ts";
 
@@ -59,7 +60,9 @@ export const createSession = async (
   platform: Platform,
   input: CreateSessionInput,
 ): Promise<AppSession> => {
-  return await createBackends()[platform].createSession(input);
+  const session = await createBackends()[platform].createSession(input);
+  await ensureTimeline(session.id);
+  return session;
 };
 
 const getBackendForSession = async (sessionId: string): Promise<HarnessBackend> => {
